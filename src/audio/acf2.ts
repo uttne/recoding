@@ -1,6 +1,19 @@
+/** Lowest frequency searched, in Hz. */
+const FMIN_HZ = 50;
+/** Highest frequency searched. Aligned with SwiftF0's upper bound. */
+const FMAX_HZ = 2100;
+/** Shortest local peak at least this fraction of the best normalized peak wins. */
+const PEAK_RATIO = 0.9;
+/** Normalized peak divided by lag 0. Below this the frame is unvoiced. */
+const CLARITY_MIN = 0.3;
+
 /**
- * ACF2+ pitch detector, the autocorrelation used by pitchreader and merged
- * into Chris Wilson's PitchDetect from dalatant's 2016 proposal.
+ * ACF2+ pitch detector. The RMS gate, edge trim, and parabolic interpolation
+ * follow dalatant's PitchDetect proposal. The searched lag is limited to
+ * 50–2100 Hz. Peak heights are compared after dividing by the overlap count,
+ * so a short lag is not preferred just because more products contribute.
+ * The lag itself stays on a peak of the raw sum: normalizing before the
+ * search moved an 82.41 Hz peak at 48 kHz from lag 582 to 588.
  * Returns the fundamental frequency in Hz, or -1 when the frame is silent
  * or no period can be estimated.
  */
@@ -32,34 +45,56 @@ export function acf2Plus(buf: Float32Array, sampleRate: number): number {
 
   const sliced = buf.subarray(r1, r2);
   const size = sliced.length;
-  const correlation = new Float32Array(size);
+  const raw = new Float32Array(size);
   for (let tau = 0; tau < size; tau++) {
     let sum = 0;
-    const end = size - tau;
-    for (let i = 0; i < end; i++) sum += sliced[i] * sliced[i + tau];
-    correlation[tau] = sum;
+    const overlap = size - tau;
+    for (let i = 0; i < overlap; i++) sum += sliced[i] * sliced[i + tau];
+    raw[tau] = sum;
   }
+  if (!(raw[0] > 0)) return -1;
 
   let dip = 0;
-  while (dip + 1 < size && correlation[dip] > correlation[dip + 1]) dip++;
+  while (dip + 1 < size && raw[dip] > raw[dip + 1]) dip++;
 
+  const minLag = Math.max(dip, Math.ceil(sampleRate / FMAX_HZ));
+  const maxLag = Math.min(size - 2, Math.floor(sampleRate / FMIN_HZ));
+  if (minLag > maxLag) return -1;
+
+  const height = (tau: number) => raw[tau] / (size - tau);
   let maxValue = -Infinity;
-  let maxLag = -1;
-  for (let tau = dip; tau < size; tau++) {
-    if (correlation[tau] > maxValue) {
-      maxValue = correlation[tau];
-      maxLag = tau;
+  let rawMaxAt = -1;
+  let rawMax = -Infinity;
+  for (let tau = minLag; tau <= maxLag; tau++) {
+    const value = height(tau);
+    if (value > maxValue) maxValue = value;
+    if (raw[tau] > rawMax) {
+      rawMax = raw[tau];
+      rawMaxAt = tau;
     }
   }
-  if (maxLag <= 0 || maxLag >= size - 1) return -1;
+  if (rawMaxAt <= 0) return -1;
 
-  const left = correlation[maxLag - 1];
-  const center = correlation[maxLag];
-  const right = correlation[maxLag + 1];
+  const peakThreshold = PEAK_RATIO * maxValue;
+  let chosen = -1;
+  for (let tau = Math.max(minLag, 1); tau <= maxLag; tau++) {
+    if (height(tau) < peakThreshold) continue;
+    if (raw[tau] >= raw[tau - 1] && raw[tau] >= raw[tau + 1]) {
+      chosen = tau;
+      break;
+    }
+  }
+  if (chosen < 0) chosen = rawMaxAt;
+  if (chosen <= 0 || chosen >= size - 1) return -1;
+  if (height(chosen) / height(0) < CLARITY_MIN) return -1;
+
+  const left = raw[chosen - 1];
+  const center = raw[chosen];
+  const right = raw[chosen + 1];
   const a = (left + right - 2 * center) / 2;
   const b = (right - left) / 2;
-  let period = maxLag;
-  if (a !== 0) period = maxLag - b / (2 * a);
+  let period = chosen;
+  if (a !== 0) period = chosen - b / (2 * a);
   if (!(period > 1)) return -1;
 
   const hz = sampleRate / period;
