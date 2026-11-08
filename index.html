@@ -9,7 +9,7 @@
     <div class="app">
       <header>
         <div class="title-block">
-          <p class="eyebrow">単音の音程をリアルタイムに記録</p>
+          <p class="eyebrow">単音と和音の音程をリアルタイムに記録</p>
           <h1>ピッチレコーダー</h1>
         </div>
         <div class="readout" aria-live="polite">
@@ -24,15 +24,35 @@
 
       <section class="controls">
         <button id="toggle" type="button">マイクを開始</button>
-        <fieldset>
+        <fieldset class="detectors">
           <legend>検出</legend>
           <label class="choice">
             <input type="radio" name="detector" value="acf2" checked />
             <span>ACF2+</span>
           </label>
           <label class="choice">
+            <input type="radio" name="detector" value="mpm" />
+            <span>MPM</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="detector" value="pyin" />
+            <span>pYIN</span>
+          </label>
+          <label class="choice">
             <input type="radio" name="detector" value="swiftf0" />
             <span>SwiftF0</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="detector" value="crepe" />
+            <span>Tiny-CREPE</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="detector" value="basic-mono" />
+            <span>Basic Pitch 単音</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="detector" value="basic-poly" />
+            <span>Basic Pitch 重音</span>
           </label>
         </fieldset>
         <label class="tune">
@@ -40,6 +60,39 @@
           <input id="a4" type="number" min="415" max="466" step="1" value="440" />
           Hz
         </label>
+        <fieldset class="limits">
+          <legend>上限</legend>
+          <label class="tune">
+            <span class="swatch acf">ACF2+</span>
+            <input id="acf-fmax" type="number" min="100" max="8000" step="1" value="4500" inputmode="decimal" />
+            Hz
+          </label>
+          <label class="tune">
+            <span class="swatch swift">SwiftF0</span>
+            <input id="swift-fmax" type="number" min="100" max="8000" step="1" value="2094" inputmode="decimal" />
+            Hz
+          </label>
+          <label class="tune">
+            <span class="swatch mpm">MPM</span>
+            <input id="mpm-fmax" type="number" min="100" max="8000" step="1" value="4500" inputmode="decimal" />
+            Hz
+          </label>
+          <label class="tune">
+            <span class="swatch pyin">pYIN</span>
+            <input id="pyin-fmax" type="number" min="100" max="8000" step="1" value="2000" inputmode="decimal" />
+            Hz
+          </label>
+          <label class="tune">
+            <span class="swatch crepe">Tiny-CREPE</span>
+            <input id="crepe-fmax" type="number" min="100" max="2100" step="1" value="2005" inputmode="decimal" />
+            Hz
+          </label>
+          <label class="tune">
+            <span class="swatch basic">Basic Pitch</span>
+            <input id="basic-fmax" type="number" min="100" max="4500" step="1" value="4186" inputmode="decimal" />
+            Hz
+          </label>
+        </fieldset>
         <div class="level" aria-hidden="true"><span id="level"></span></div>
         <button id="csv" type="button" disabled>CSV を保存</button>
         <button id="clear" type="button">グラフを消去</button>
@@ -48,7 +101,7 @@
       <p id="status" class="status">マイクの使用を許可すると、音程の線が右から流れます。</p>
       <canvas id="graph" width="1200" height="720"></canvas>
       <footer>
-        ACF2+ は時間領域の自己相関です。SwiftF0 は Lars Nieradzik のモデル（MIT、16 kHz、確定まで 176 ms）で、ブラウザ内の ONNX Runtime が推論します。音は端末の外へ出ません。
+        ACF2+、MPM、pYIN は時間領域です。SwiftF0、Tiny-CREPE、Basic Pitch はブラウザ内の ONNX Runtime が推論します。Basic Pitch の重音は同時に鳴っている音を別々の線にします。破線は選択中の検出器の下限と上限で、その外側は暗くなります。遅れて確定する検出器は、未確定の区間をその色で薄く塗ります。音は端末の外へ出ません。
       </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>

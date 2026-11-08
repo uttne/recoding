@@ -58,3 +58,14 @@ export function concatFloat32(a: Float32Array, b: Float32Array): Float32Array {
   out.set(b, a.length);
   return out;
 }
+
+/** Keep the newest `max` samples after appending `chunk`. */
+export function tailFloat32(current: Float32Array, chunk: Float32Array, max: number): Float32Array {
+  if (chunk.length >= max) return chunk.slice(chunk.length - max);
+  if (current.length + chunk.length <= max) return concatFloat32(current, chunk);
+  const out = new Float32Array(max);
+  const keep = max - chunk.length;
+  out.set(current.subarray(current.length - keep), 0);
+  out.set(chunk, keep);
+  return out;
+}

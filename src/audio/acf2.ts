@@ -1,7 +1,10 @@
 /** Lowest frequency searched, in Hz. */
-const FMIN_HZ = 50;
-/** Highest frequency searched. Aligned with SwiftF0's upper bound. */
-const FMAX_HZ = 2100;
+export const ACF_FMIN_HZ = 50;
+/**
+ * Default highest frequency searched. At 48 kHz this still leaves about
+ * 11 samples per cycle, so C8 (4186 Hz) stays inside the lag search.
+ */
+export const ACF_FMAX_HZ = 4500;
 /** Shortest local peak at least this fraction of the best normalized peak wins. */
 const PEAK_RATIO = 0.9;
 /** Normalized peak divided by lag 0. Below this the frame is unvoiced. */
@@ -9,15 +12,15 @@ const CLARITY_MIN = 0.3;
 
 /**
  * ACF2+ pitch detector. The RMS gate, edge trim, and parabolic interpolation
- * follow dalatant's PitchDetect proposal. The searched lag is limited to
- * 50–2100 Hz. Peak heights are compared after dividing by the overlap count,
+ * follow dalatant's PitchDetect proposal. The searched lag runs from 50 Hz
+ * through `fmax` (4500 Hz by default). Peak heights are compared after dividing by the overlap count,
  * so a short lag is not preferred just because more products contribute.
  * The lag itself stays on a peak of the raw sum: normalizing before the
  * search moved an 82.41 Hz peak at 48 kHz from lag 582 to 588.
  * Returns the fundamental frequency in Hz, or -1 when the frame is silent
  * or no period can be estimated.
  */
-export function acf2Plus(buf: Float32Array, sampleRate: number): number {
+export function acf2Plus(buf: Float32Array, sampleRate: number, fmax = ACF_FMAX_HZ): number {
   const size0 = buf.length;
   if (size0 < 8 || sampleRate <= 0) return -1;
 
@@ -57,8 +60,9 @@ export function acf2Plus(buf: Float32Array, sampleRate: number): number {
   let dip = 0;
   while (dip + 1 < size && raw[dip] > raw[dip + 1]) dip++;
 
-  const minLag = Math.max(dip, Math.ceil(sampleRate / FMAX_HZ));
-  const maxLag = Math.min(size - 2, Math.floor(sampleRate / FMIN_HZ));
+  const ceiling = Number.isFinite(fmax) && fmax > ACF_FMIN_HZ ? fmax : ACF_FMAX_HZ;
+  const minLag = Math.max(dip, Math.ceil(sampleRate / ceiling));
+  const maxLag = Math.min(size - 2, Math.floor(sampleRate / ACF_FMIN_HZ));
   if (minLag > maxLag) return -1;
 
   const height = (tau: number) => raw[tau] / (size - tau);

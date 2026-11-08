@@ -37,6 +37,17 @@ describe("acf2Plus", () => {
     }
   });
 
+  it("estimates 3000 Hz when the ceiling allows it", () => {
+    const sampleRate = 48_000;
+    const window = acfWindowSize(sampleRate);
+    const tone = sine(3_000, sampleRate, window);
+    const open = acf2Plus(tone, sampleRate);
+    expect(Math.abs(cents(open, 3_000)), "default ceiling").toBeLessThan(10);
+    const capped = acf2Plus(tone, sampleRate, 2_100);
+    if (capped > 0) expect(Math.abs(cents(capped, 3_000)), "2100 Hz ceiling").toBeGreaterThan(50);
+    else expect(capped).toBe(-1);
+  });
+
   it("returns -1 for silence", () => {
     expect(acf2Plus(sine(440, 48_000, 2048, 0.001), 48_000)).toBe(-1);
     expect(acf2Plus(new Float32Array(2048), 48_000)).toBe(-1);

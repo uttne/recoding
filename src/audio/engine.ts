@@ -1,15 +1,33 @@
-import { acf2Plus, acfWindowSize } from "./acf2";
+import { ACF_FMAX_HZ, acf2Plus, acfWindowSize } from "./acf2";
+import {
+  BASIC_FMAX_HZ,
+  BasicPitchStream,
+  type BasicFrame,
+  type BasicMode,
+} from "./basicpitch";
+import { inferBasic, loadBasicSession } from "./basicpitch-session";
+import { CREPE_FMAX_HZ, CrepeStream, type CrepeFrame } from "./crepe";
+import { inferCrepe, loadCrepeSession } from "./crepe-session";
+import { createMpm, MPM_FMAX_HZ, mpmWindowSize } from "./mpm";
+import { PYIN_FMAX_HZ, PyinStream, type PyinFrame } from "./pyin";
 import { StreamResampler } from "./resample";
 import { inferSwift, loadSwiftSession } from "./swiftf0-session";
-import { SWIFT_SAMPLE_RATE, SwiftF0Stream, type SwiftFrame } from "./swiftf0";
+import { SWIFT_FMAX, SWIFT_SAMPLE_RATE, SwiftF0Stream, type SwiftFrame } from "./swiftf0";
 
-export type DetectorId = "acf2" | "swiftf0";
+export type DetectorId = "acf2" | "swiftf0" | "mpm" | "pyin" | "crepe" | "basic-mono" | "basic-poly";
+
+export type PitchEvent = {
+  hz: number;
+  confidence: number;
+};
 
 export type PitchPoint = {
   time: number;
   hz: number | null;
   confidence: number;
   detector: DetectorId;
+  /** Loudest first. Present for Basic Pitch 重音 when at least one note is active. */
+  pitches?: readonly PitchEvent[];
 };
 
 type Handlers = {
@@ -47,44 +65,59 @@ class RingBuffer {
 }
 
 export class PitchEngine {
-  detector: DetectorId = "acf2";
+  acfFmax = ACF_FMAX_HZ;
+  swiftFmax = SWIFT_FMAX;
+  mpmFmax = MPM_FMAX_HZ;
+  pyinFmax = PYIN_FMAX_HZ;
+  crepeFmax = CREPE_FMAX_HZ;
+  basicFmax = BASIC_FMAX_HZ;
+  private detectorId: DetectorId = "acf2";
   private context: AudioContext | null = null;
   private media: MediaStream | null = null;
   private worklet: AudioWorkletNode | null = null;
   private ring = new RingBuffer(8192);
   private samples = 0;
   private lastAcfTime = -1;
+  private lastMpmTime = -1;
+  private mpm: ReturnType<typeof createMpm> | null = null;
+  private mpmRate = 0;
   private resampler: StreamResampler | null = null;
   private swift: SwiftF0Stream | null = null;
   private swiftOrigin = 0;
-  private modelReady = false;
-  private modelLoading = false;
-  private modelError: string | null = null;
+  private pyin: PyinStream | null = null;
+  private pyinOrigin = 0;
+  private crepe: CrepeStream | null = null;
+  private basic: BasicPitchStream | null = null;
+  private swiftReady = false;
+  private swiftLoading = false;
+  private swiftError: string | null = null;
+  private crepeReady = false;
+  private crepeLoading = false;
+  private crepeError: string | null = null;
+  private basicReady = false;
+  private basicLoading = false;
+  private basicError: string | null = null;
   running = false;
 
   constructor(private readonly handlers: Handlers) {}
+
+  get detector(): DetectorId {
+    return this.detectorId;
+  }
+
+  set detector(value: DetectorId) {
+    this.detectorId = value;
+    this.sync();
+  }
 
   get time(): number {
     return this.context ? this.samples / this.context.sampleRate : 0;
   }
 
   preloadModel(): void {
-    void this.prepareModel();
-  }
-
-  private async prepareModel(): Promise<void> {
-    if (this.modelReady || this.modelError || this.modelLoading) return;
-    this.modelLoading = true;
-    this.handlers.onStatus("SwiftF0 のモデルを読み込んでいます");
-    try {
-      await loadSwiftSession();
-      this.modelReady = true;
-      this.handlers.onStatus(this.running ? "録音中" : "準備できました");
-      this.attachSwift();
-    } catch (error) {
-      this.modelError = error instanceof Error ? error.message : String(error);
-      this.handlers.onStatus(`SwiftF0 を読み込めませんでした: ${this.modelError}`);
-    }
+    void this.prepareSwift();
+    if (this.detectorId === "crepe") void this.prepareCrepe();
+    if (this.isBasic) void this.prepareBasic();
   }
 
   async start(): Promise<void> {
@@ -120,10 +153,12 @@ export class PitchEngine {
     mute.connect(this.context.destination);
     this.running = true;
     this.lastAcfTime = -1;
+    this.lastMpmTime = -1;
     this.ring = new RingBuffer(8192);
-    this.attachSwift();
-    this.handlers.onStatus(this.modelReady ? "録音中" : "録音中。SwiftF0 はモデルの読み込み後に使えます");
-    void this.prepareModel();
+    this.mpm = null;
+    this.openStreams();
+    this.handlers.onStatus(this.runningStatus());
+    this.preloadModel();
   }
 
   stop(): void {
@@ -137,22 +172,131 @@ export class PitchEngine {
     void this.swift?.flush();
     this.swift = null;
     this.resampler = null;
+    this.pyin = null;
+    this.crepe?.setEnabled(false);
+    this.basic?.setEnabled(false);
+    this.crepe = null;
+    this.basic = null;
+    this.mpm = null;
     this.handlers.onLevel(0);
     this.handlers.onStatus("停止しました");
   }
 
+  private get isBasic(): boolean {
+    return this.detectorId === "basic-mono" || this.detectorId === "basic-poly";
+  }
+
+  private basicMode(): BasicMode {
+    return this.detectorId === "basic-poly" ? "poly" : "mono";
+  }
+
+  private runningStatus(): string {
+    if (this.detectorId === "swiftf0" && !this.swiftReady) return "録音中。SwiftF0 はモデルの読み込み後に使えます";
+    if (this.detectorId === "crepe" && !this.crepeReady) return "録音中。Tiny-CREPE はモデルの読み込み後に使えます";
+    if (this.isBasic && !this.basicReady) return "録音中。Basic Pitch はモデルの読み込み後に使えます";
+    return "録音中";
+  }
+
+  private announce(model: "swiftf0" | "crepe" | "basic"): boolean {
+    if (model === "crepe") return this.detectorId === "crepe";
+    if (model === "basic") return this.isBasic;
+    return this.detectorId !== "crepe" && !this.isBasic;
+  }
+
+  private async prepareSwift(): Promise<void> {
+    if (this.swiftReady || this.swiftError || this.swiftLoading) return;
+    this.swiftLoading = true;
+    if (this.announce("swiftf0")) this.handlers.onStatus("SwiftF0 のモデルを読み込んでいます");
+    try {
+      await loadSwiftSession();
+      this.swiftReady = true;
+      if (this.announce("swiftf0")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      this.attachSwift();
+    } catch (error) {
+      this.swiftError = error instanceof Error ? error.message : String(error);
+      if (this.announce("swiftf0")) this.handlers.onStatus(`SwiftF0 を読み込めませんでした: ${this.swiftError}`);
+    }
+  }
+
+  private async prepareCrepe(): Promise<void> {
+    if (this.crepeReady || this.crepeError || this.crepeLoading) return;
+    this.crepeLoading = true;
+    if (this.announce("crepe")) this.handlers.onStatus("Tiny-CREPE のモデルを読み込んでいます");
+    try {
+      await loadCrepeSession();
+      this.crepeReady = true;
+      if (this.announce("crepe")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      this.sync();
+    } catch (error) {
+      this.crepeError = error instanceof Error ? error.message : String(error);
+      if (this.announce("crepe")) this.handlers.onStatus(`Tiny-CREPE を読み込めませんでした: ${this.crepeError}`);
+    }
+  }
+
+  private async prepareBasic(): Promise<void> {
+    if (this.basicReady || this.basicError || this.basicLoading) return;
+    this.basicLoading = true;
+    if (this.announce("basic")) this.handlers.onStatus("Basic Pitch のモデルを読み込んでいます");
+    try {
+      await loadBasicSession();
+      this.basicReady = true;
+      if (this.announce("basic")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      this.sync();
+    } catch (error) {
+      this.basicError = error instanceof Error ? error.message : String(error);
+      if (this.announce("basic")) this.handlers.onStatus(`Basic Pitch を読み込めませんでした: ${this.basicError}`);
+    }
+  }
+
+  private openStreams(): void {
+    if (!this.context) return;
+    const rate = this.context.sampleRate;
+    this.crepe = new CrepeStream(
+      rate,
+      inferCrepe,
+      (frames) => this.onCrepe(frames),
+      (error) => this.fail("Tiny-CREPE", error),
+      () => this.crepeFmax,
+    );
+    this.basic = new BasicPitchStream(
+      rate,
+      inferBasic,
+      (frames) => this.onBasic(frames),
+      (error) => this.fail("Basic Pitch", error),
+      () => this.basicMode(),
+      () => this.basicFmax,
+    );
+    this.sync();
+  }
+
+  private sync(): void {
+    this.crepe?.setEnabled(this.running && this.detectorId === "crepe" && this.crepeReady);
+    this.basic?.setEnabled(this.running && this.isBasic && this.basicReady);
+    if (this.detectorId === "pyin") this.ensurePyin();
+    else this.pyin = null;
+    if (this.detectorId === "swiftf0") this.attachSwift();
+  }
+
+  private ensurePyin(): void {
+    if (!this.running || !this.context || this.pyin) return;
+    this.pyinOrigin = this.time;
+    this.pyin = new PyinStream(this.context.sampleRate, () => this.pyinFmax, (frames) => this.onPyin(frames));
+  }
+
   private attachSwift(): void {
-    if (!this.running || !this.modelReady || !this.context || this.swift) return;
+    if (!this.running || !this.swiftReady || !this.context || this.swift) return;
     this.resampler = new StreamResampler(this.context.sampleRate, SWIFT_SAMPLE_RATE);
     this.swiftOrigin = this.samples / this.context.sampleRate;
     this.swift = new SwiftF0Stream(
-      inferSwift,
+      (audio) => inferSwift(audio, this.swiftFmax),
       (frames) => this.onSwiftFrames(frames),
-      (error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        this.handlers.onStatus(`SwiftF0 の推論に失敗しました: ${message}`);
-      },
+      (error) => this.fail("SwiftF0", error),
     );
+  }
+
+  private fail(name: string, error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.handlers.onStatus(`${name} の推論に失敗しました: ${message}`);
   }
 
   private onChunk(chunk: Float32Array): void {
@@ -164,11 +308,11 @@ export class PitchEngine {
     this.handlers.onClock(time);
     this.handlers.onLevel(rms(chunk));
 
-    if (this.detector === "acf2" && time - this.lastAcfTime >= 0.016) {
+    if (this.detectorId === "acf2" && time - this.lastAcfTime >= 0.016) {
       const frame = this.ring.latest(acfWindowSize(sampleRate));
       if (frame) {
         this.lastAcfTime = time;
-        const hz = acf2Plus(frame, sampleRate);
+        const hz = acf2Plus(frame, sampleRate, this.acfFmax);
         this.handlers.onPoint({
           time,
           hz: hz > 0 ? hz : null,
@@ -178,11 +322,33 @@ export class PitchEngine {
       }
     }
 
+    if (this.detectorId === "mpm" && time - this.lastMpmTime >= 0.016) {
+      const size = this.mpm?.bufferSize ?? mpmWindowSize(sampleRate);
+      const frame = this.ring.latest(size);
+      if (frame) {
+        this.lastMpmTime = time;
+        if (!this.mpm || this.mpmRate !== sampleRate || this.mpm.bufferSize !== frame.length) {
+          this.mpm = createMpm(sampleRate, frame.length);
+          this.mpmRate = sampleRate;
+        }
+        const reading = this.mpm.estimate(frame, this.mpmFmax);
+        this.handlers.onPoint({
+          time,
+          hz: reading.hz,
+          confidence: reading.confidence,
+          detector: "mpm",
+        });
+      }
+    }
+
+    if (this.pyin && this.detectorId === "pyin") this.pyin.push(chunk);
     if (this.swift && this.resampler) this.swift.push(this.resampler.push(chunk));
+    this.crepe?.push(chunk);
+    this.basic?.push(chunk);
   }
 
   private onSwiftFrames(frames: SwiftFrame[]): void {
-    if (this.detector !== "swiftf0") return;
+    if (this.detectorId !== "swiftf0") return;
     for (const frame of frames) {
       const voiced = frame.confidence >= 0.5 && frame.hz > 0;
       this.handlers.onPoint({
@@ -190,6 +356,45 @@ export class PitchEngine {
         hz: voiced ? frame.hz : null,
         confidence: frame.confidence,
         detector: "swiftf0",
+      });
+    }
+  }
+
+  private onPyin(frames: PyinFrame[]): void {
+    if (this.detectorId !== "pyin") return;
+    for (const frame of frames) {
+      this.handlers.onPoint({
+        time: this.pyinOrigin + frame.time,
+        hz: frame.hz,
+        confidence: frame.confidence,
+        detector: "pyin",
+      });
+    }
+  }
+
+  private onCrepe(frames: CrepeFrame[]): void {
+    if (this.detectorId !== "crepe") return;
+    for (const frame of frames) {
+      this.handlers.onPoint({
+        time: frame.time,
+        hz: frame.hz,
+        confidence: frame.confidence,
+        detector: "crepe",
+      });
+    }
+  }
+
+  private onBasic(frames: BasicFrame[]): void {
+    if (!this.isBasic) return;
+    const detector = this.detectorId;
+    for (const frame of frames) {
+      const primary = frame.pitches[0];
+      this.handlers.onPoint({
+        time: frame.time,
+        hz: primary ? primary.hz : null,
+        confidence: primary ? primary.confidence : 0,
+        detector,
+        pitches: detector === "basic-poly" && frame.pitches.length > 0 ? frame.pitches : undefined,
       });
     }
   }

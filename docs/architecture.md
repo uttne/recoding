@@ -12,8 +12,11 @@
                  └ AudioWorklet「capture」（512 サンプルごとに転送）
                       └ Gain 0 → destination
                  └ PitchEngine.onChunk
-                      ├ RingBuffer（直近 8192 サンプル）→ ACF2+
-                      └ StreamResampler → 16 kHz → SwiftF0Stream → Worker（ONNX）
+                      ├ RingBuffer（直近 8192 サンプル）→ ACF2+ または MPM
+                      ├ 選択中だけ → PyinStream（pYIN）
+                      ├ StreamResampler → 16 kHz → SwiftF0Stream → Worker
+                      ├ StreamResampler → 16 kHz → CrepeStream → Worker
+                      └ StreamResampler → 22050 Hz → BasicPitchStream → Worker
                            └ 選択中の検出器の点だけ onPoint
                                 └ main.ts の points[]
                                      └ requestAnimationFrame で PitchGraph.draw
@@ -23,7 +26,7 @@ Worklet から `destination` まで繋がないと、ブラウザがこのグラ
 
 マイク制約は、`autoGainControl` を端末がサポートするとき `echoCancellation: false`、`noiseSuppression: true`、`autoGainControl: true` です。サポートしないときは `{ audio: true }` です。
 
-`AudioContext` はサンプルレートを指定せずに作ります。ACF2+ はそのレートのまま計算します。SwiftF0 へ渡す前に `StreamResampler` が 16 kHz へ下げます。すでに 16 kHz のときはコピーするだけです。
+`AudioContext` はサンプルレートを指定せずに作ります。ACF2+、MPM、pYIN はそのレートのまま計算します。SwiftF0 と Tiny-CREPE へ渡す前に `StreamResampler` が 16 kHz へ下げ、Basic Pitch は 22050 Hz へ下げます。すでに目的のレートのときはコピーするだけです。
 
 ## 時刻
 
@@ -31,17 +34,21 @@ Worklet から `destination` まで繋がないと、ブラウザがこのグラ
 
 SwiftF0 のフレーム時刻は 16 kHz ストリームの先頭が 0 秒です。モデルの準備が遅れてストリームを後から作った場合、`PitchEngine` が `swiftOrigin` を足し、マイク開始からの秒に揃えます。SwiftF0 の点は公式実装どおり 176 ms 遅れて確定するので、同じ瞬間の ACF2+ より左に出ます。推論は `src/audio/swiftf0.worker.ts` の `InferenceSession` が行います。メインスレッドは音声バッファのコピーを渡し、`pitch` と `confidence` を受け取ります。点の時刻は動かしません。
 
+Tiny-CREPE の点は、64 ms の窓の中心の時刻です。窓の後半が揃うまで 32 ms かかります。pYIN の点はフレーム時刻で、HMM が確定するまで描かれません。Basic Pitch の点は 22050 Hz ストリーム上のフレーム時刻です。最初の窓が揃うまで約 2 秒かかり、その後も窓の終端より約 0.17 秒手前までしか確定しません。いずれの遅延も、点の時刻を「今」へ動かしません。
+
 描画の「今」は、直近チャンクの時刻と、最後の点の時刻の大きい方です。横軸は常にその「今」から 8 秒前までです。
 
 ## 検出器の選択
 
-`PitchEngine.detector` は `"acf2"` か `"swiftf0"` です。初期値は `"acf2"` です。
+`PitchEngine.detector` は `"acf2"`、`"mpm"`、`"pyin"`、`"swiftf0"`、`"crepe"`、`"basic-mono"`、`"basic-poly"` のいずれかです。初期値は `"acf2"` です。
 
-ACF2+ は、選択中のときだけ 16 ms 以上間隔を空けて実行します。SwiftF0 はモデルの読み込みが終わるとストリームを作り、選択に関係なく 16 kHz の音声を流し続けます。推論は裏で進みますが、`onPoint` に載るのは選択中の検出器だけです。切り替えた直後から SwiftF0 の確定フレームが出るのは、この先行入力のためです。
+ACF2+ と MPM は、選択中のときだけ 16 ms 以上間隔を空けて実行します。pYIN は選択中だけチャンクを渡します。外すとトラッカーを捨て、次に選んだときにマイクの今の時刻から作り直します。SwiftF0 はモデルの読み込みが終わるとストリームを作り、選択に関係なく 16 kHz の音声を流し続けます。推論は裏で進みますが、`onPoint` に載るのは選択中の検出器だけです。切り替えた直後から SwiftF0 の確定フレームが出るのは、この先行入力のためです。
 
-モデルの読み込みはページ表示時の `preloadModel()` で始まります。失敗すると `modelError` を覚え、同じページでは再試行しません。ACF2+ はそのまま使えます。
+Tiny-CREPE と Basic Pitch のリサンプルは、マイクが開いているあいだ続けます。推論するのは、その検出器が選ばれてモデルの読み込みが終わったときだけです。Basic Pitch の単音と重音は同じ推論で、結果を返すときにどちらの読み方をするかが決まります。
 
-停止時は MediaStream のトラックを止め、AudioContext を閉じ、SwiftF0 ストリームを `flush` します。`flush` は残り 176 ms 分のフレームも返します。
+SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始まります。Tiny-CREPE と Basic Pitch は、そのラジオを選んだときに始まります。失敗すると各モデルがエラーを覚え、同じページでは再試行しません。信号処理の検出器はそのまま使えます。
+
+停止時は MediaStream のトラックを止め、AudioContext を閉じ、SwiftF0 ストリームを `flush` します。`flush` は残り 176 ms 分のフレームも返します。Tiny-CREPE と Basic Pitch は、走っている推論の結果を捨てます。
 
 ## 画面が持っている状態
 
@@ -58,15 +65,15 @@ ACF2+ は、選択中のときだけ 16 ms 以上間隔を空けて実行しま�
 
 ## グラフ
 
-`src/graph.ts` の縦軸は MIDI 30（F♯1 付近）から 108（C8）です。C の線だけ音名を左に出します。1 半音を超える飛び、50 ms を超える時間の空き、検出器の切り替わりでは線を切ります。範囲外の MIDI は上下の端に張り付きます。Hz 自体は点に残るので、CSV には範囲外の周波数も入ります。
+`src/graph.ts` の縦軸は MIDI 30（F♯1 付近）から、少なくとも 108（C8）までです。どれかの上限が C8 を超えると、その音が収まるところまで上へ伸ばします。C の線だけ音名を左に出します。選択中の検出器の下限と上限を、その色の破線と音名で示します。下限より下と上限より上を暗くします。半音の半分を超える飛び（Basic Pitch は 0.75 半音）、50 ms を超える時間の空き、検出器の切り替わり、無音では線を切ります。Basic Pitch の重音は、近い音どうしを別の線としてつなぎます。範囲外の MIDI は上下の端に張り付きます。Hz 自体は点に残るので、CSV には範囲外の周波数も入ります。重音の CSV は、同じ時刻の音を 1 行ずつ書きます。
 
-SwiftF0 を選択してマイクが動作しているあいだは、最後に確定した点から右端までを `#7ed0cb` のアルファ 0.12 で塗ります。点がまだ無いときは 0 秒から塗ります。この帯は未確定の区間であり、無音ではありません。停止中と ACF2+ の選択中は塗りません。
+SwiftF0、pYIN、Tiny-CREPE、Basic Pitch を選択してマイクが動作しているあいだは、最後に確定した点から右端までを、その検出器の色のアルファ 0.12 で塗ります。その検出器へ切り替えたあとまだ点が無いときは、切り替えた時刻から塗ります。この帯は未確定の区間であり、無音ではありません。停止中と、ACF2+ または MPM の選択中は塗りません。
 
 `devicePixelRatio` に合わせてキャンバスの内部解像度を変えます。リサイズは `window` の `resize` だけを見ています。
 
 ## ONNX Runtime の置き場所
 
-SwiftF0 は `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行時に次の 2 ファイルを `/ort/` から取ります。
+SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行時に次の 2 ファイルを `/ort/` から取ります。
 
 - `ort-wasm-simd-threaded.mjs`
 - `ort-wasm-simd-threaded.wasm`
@@ -88,7 +95,7 @@ SwiftF0 は `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行�
 
 `onnxruntime-web/wasm` の型はパッケージの export 条件だけでは解決しないため、`src/onnxruntime-web-wasm.d.ts` が `onnxruntime-common` を再公開しています。import パスを変えるときはこの宣言も合わせます。
 
-モデル本体は `public/models/swift-f0.onnx` です。`public` に置いて問題ないのは、`fetch` で読むだけで、JavaScript の `import` をしないためです。ライセンス文は同じディレクトリの `LICENSE-SWIFTF0.txt` です。モデルを差し替えるときは、入力名 `audio` / `fmin` / `fmax` と出力名 `pitch` / `confidence` が変わっていないか確認します。
+モデル本体は `public/models/` の `swift-f0.onnx`、`crepe-tiny.onnx`、`nmp.onnx` です。`public` に置いて問題ないのは、`fetch` で読むだけで、JavaScript の `import` をしないためです。ライセンス文は同じディレクトリの `LICENSE-SWIFTF0.txt`、`LICENSE-CREPE.txt`、`LICENSE-BASIC-PITCH.txt` です。SwiftF0 を差し替えるときは、入力名 `audio` / `fmin` / `fmax` と出力名 `pitch` / `confidence` が変わっていないか確認します。Tiny-CREPE は `frames` と `probabilities`、Basic Pitch は `serving_default_input_2:0` と `StatefulPartitionedCall:1`（ノート）、`StatefulPartitionedCall:0`（コントゥア）です。
 
 ## 変更するときの入口
 
@@ -99,10 +106,14 @@ SwiftF0 は `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行�
 | マイクの制約、16 ms の間隔 | `src/audio/engine.ts` |
 | ACF2+ の式やしきい値 | `src/audio/acf2.ts` と `src/audio/acf2.test.ts` |
 | SwiftF0 の先読みや無音ゲート | `src/audio/swiftf0.ts` と `src/audio/swiftf0.test.ts` |
-| モデルの入出力テンソル | `src/audio/swiftf0.worker.ts` |
-| Worker との送受信 | `src/audio/swiftf0-session.ts` |
-| 16 kHz への変換 | `src/audio/resample.ts` |
+| MPM の窓と上限 | `src/audio/mpm.ts` と `src/audio/mpm.test.ts` |
+| pYIN のトラッカー | `src/audio/pyin.ts` と `src/audio/pyin.test.ts` |
+| Tiny-CREPE のフレームと復号 | `src/audio/crepe.ts` と `src/audio/crepe.test.ts` |
+| Basic Pitch の窓と単音・重音 | `src/audio/basicpitch.ts` と `src/audio/basicpitch.test.ts` |
+| モデルの入出力テンソル | `src/audio/swiftf0.worker.ts`、`crepe.worker.ts`、`basicpitch.worker.ts` |
+| Worker との送受信 | `src/audio/swiftf0-session.ts`、`crepe-session.ts`、`basicpitch-session.ts` |
+| 16 kHz または 22050 Hz への変換 | `src/audio/resample.ts` |
 | 音名と MIDI の式 | `src/audio/notes.ts` |
-| WASM の配信パス | `vite.config.ts` と `swiftf0.worker.ts` の `wasmPaths` |
+| WASM の配信パス | `vite.config.ts` と各 `*.worker.ts` の `wasmPaths` |
 
 Worklet は Vite のモジュールではなく `public/capture-worklet.js` です。`AudioWorkletGlobalScope` で動き、DOM や `src/` の import は使えません。ブロック長を変えるときは、メイン側が任意長の `Float32Array` を受け取れることを確認します。今の `onChunk` は長さを固定していません。

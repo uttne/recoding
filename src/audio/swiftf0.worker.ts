@@ -57,7 +57,7 @@ async function handle(message: SwiftWorkerRequest): Promise<void> {
     const output = await session.run({
       audio: new ort.Tensor("float32", message.audio, [1, message.audio.length]),
       fmin: new ort.Tensor("float32", Float32Array.of(SWIFT_FMIN), []),
-      fmax: new ort.Tensor("float32", Float32Array.of(SWIFT_FMAX), []),
+      fmax: new ort.Tensor("float32", Float32Array.of(message.fmax > SWIFT_FMIN ? message.fmax : SWIFT_FMAX), []),
     });
     const elapsedMs = performance.now() - started;
     const pitchTensor = output.pitch;

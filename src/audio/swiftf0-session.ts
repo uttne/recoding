@@ -76,7 +76,7 @@ export function loadSwiftSession(): Promise<void> {
   return pendingReady;
 }
 
-export function inferSwift(audio: Float32Array): Promise<SwiftInference> {
+export function inferSwift(audio: Float32Array, fmax: number): Promise<SwiftInference> {
   return loadSwiftSession().then(
     () =>
       new Promise((resolve, reject) => {
@@ -84,7 +84,7 @@ export function inferSwift(audio: Float32Array): Promise<SwiftInference> {
         // The stream reads this buffer again for the silence gate, so transfer a copy.
         const copy = new Float32Array(audio);
         pending.set(id, { resolve, reject });
-        getWorker().postMessage({ type: "infer", id, audio: copy }, [copy.buffer]);
+        getWorker().postMessage({ type: "infer", id, audio: copy, fmax }, [copy.buffer]);
       }),
   );
 }

@@ -26,7 +26,7 @@ export type SwiftInferFn = (audio: Float32Array) => Promise<SwiftInference>;
 
 export type SwiftWorkerRequest =
   | { type: "load" }
-  | { type: "infer"; id: number; audio: Float32Array };
+  | { type: "infer"; id: number; audio: Float32Array; fmax: number };
 
 export type SwiftWorkerResponse =
   | { type: "ready" }
