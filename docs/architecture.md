@@ -7,7 +7,7 @@
 ```text
 マイク
   └ getUserMedia
-       └ AudioContext（可能なら 16 kHz）
+       └ AudioContext（端末の標準レート）
             └ MediaStreamSource
                  └ AudioWorklet「capture」（512 サンプルごとに転送）
                       └ Gain 0 → destination
@@ -23,7 +23,7 @@ Worklet から `destination` まで繋がないと、ブラウザがこのグラ
 
 マイク制約は、`autoGainControl` を端末がサポートするとき `echoCancellation: false`、`noiseSuppression: true`、`autoGainControl: true` です。サポートしないときは `{ audio: true }` です。
 
-`AudioContext` はまず `sampleRate: 16000` で作ります。コンストラクタが拒否したら、端末の標準レートで作り、SwiftF0 へ渡す前に `StreamResampler` が 16 kHz へ下げます。ACF2+ はコンテキストの実レートのまま計算します。
+`AudioContext` はサンプルレートを指定せずに作ります。ACF2+ はそのレートのまま計算します。SwiftF0 へ渡す前に `StreamResampler` が 16 kHz へ下げます。すでに 16 kHz のときはコピーするだけです。
 
 ## 時刻
 

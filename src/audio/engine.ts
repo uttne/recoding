@@ -95,11 +95,7 @@ export class PitchEngine {
       : true;
     const mediaPromise = navigator.mediaDevices.getUserMedia({ audio, video: false });
     const AudioCtx = window.AudioContext;
-    try {
-      this.context = new AudioCtx({ sampleRate: SWIFT_SAMPLE_RATE });
-    } catch {
-      this.context = new AudioCtx();
-    }
+    this.context = new AudioCtx();
     try {
       this.media = await mediaPromise;
       if (this.context.state === "suspended") await this.context.resume();
