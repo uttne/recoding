@@ -8,6 +8,7 @@ const GUTTER = 56;
 
 const COLOR: Record<DetectorId, string> = {
   acf2: "#e6a15c",
+  "acf-basic": "#f2b48a",
   swiftf0: "#7ed0cb",
   mpm: "#e6d36a",
   pyin: "#c792ea",
@@ -16,8 +17,14 @@ const COLOR: Record<DetectorId, string> = {
   "basic-poly": "#e07a6a",
 };
 
+function traceColor(detector: DetectorId, provisional: boolean): string {
+  if (detector === "acf-basic") return provisional ? COLOR.acf2 : COLOR["basic-mono"];
+  return COLOR[detector];
+}
+
 const LIMIT_LABEL: Record<DetectorId, string> = {
   acf2: "ACF2+",
+  "acf-basic": "ACF→Basic",
   swiftf0: "SwiftF0",
   mpm: "MPM",
   pyin: "pYIN",
@@ -111,7 +118,7 @@ export class PitchGraph {
       if (x1 > x0) {
         ctx.save();
         ctx.globalAlpha = 0.12;
-        ctx.fillStyle = COLOR[ranges.active];
+        ctx.fillStyle = ranges.active === "acf-basic" ? COLOR.acf2 : COLOR[ranges.active];
         ctx.fillRect(x0, plotTop, x1 - x0, plotHeight);
         ctx.restore();
       }
@@ -150,8 +157,8 @@ export class PitchGraph {
     plotHeight: number,
   ): void {
     const maxGap = (0.05 / WINDOW_SECONDS) * plotWidth;
-    type Line = { detector: DetectorId; xs: number[]; ys: number[] };
-    type Open = { x: number; midi: number; detector: DetectorId; line: Line };
+    type Line = { detector: DetectorId; provisional: boolean; xs: number[]; ys: number[] };
+    type Open = { x: number; y: number; midi: number; detector: DetectorId; provisional: boolean; line: Line };
     const lines: Line[] = [];
     let open: Open[] = [];
     for (const point of visible) {
@@ -161,6 +168,7 @@ export class PitchGraph {
         open = [];
         continue;
       }
+      const provisional = point.provisional === true;
       const limit = point.detector === "basic-mono" || point.detector === "basic-poly" ? 0.75 : 0.5;
       const used = new Set<number>();
       const next: Open[] = [];
@@ -179,14 +187,20 @@ export class PitchGraph {
         const y = this.yAt(midi, plotTop, plotHeight);
         if (best >= 0) {
           used.add(best);
-          const line = open[best].line;
-          line.xs.push(x);
-          line.ys.push(y);
-          next.push({ x, midi, detector: point.detector, line });
+          const prev = open[best];
+          prev.line.xs.push(x);
+          prev.line.ys.push(y);
+          if (prev.provisional === provisional) {
+            next.push({ x, y, midi, detector: point.detector, provisional, line: prev.line });
+          } else {
+            const line: Line = { detector: point.detector, provisional, xs: [prev.x, x], ys: [prev.y, y] };
+            lines.push(line);
+            next.push({ x, y, midi, detector: point.detector, provisional, line });
+          }
         } else {
-          const line: Line = { detector: point.detector, xs: [x], ys: [y] };
+          const line: Line = { detector: point.detector, provisional, xs: [x], ys: [y] };
           lines.push(line);
-          next.push({ x, midi, detector: point.detector, line });
+          next.push({ x, y, midi, detector: point.detector, provisional, line });
         }
       }
       open = next;
@@ -194,7 +208,7 @@ export class PitchGraph {
     const { ctx } = this;
     for (const line of lines) {
       ctx.beginPath();
-      ctx.strokeStyle = COLOR[line.detector];
+      ctx.strokeStyle = traceColor(line.detector, line.provisional);
       ctx.moveTo(line.xs[0], line.ys[0]);
       for (let i = 1; i < line.xs.length; i++) ctx.lineTo(line.xs[i], line.ys[i]);
       ctx.stroke();

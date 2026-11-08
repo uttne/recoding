@@ -38,9 +38,9 @@ mise をシェルに有効化している場合は `mise exec --` を外して `
 
 ## 画面の仕様
 
-- 初期の検出器は ACF2+ です。線の色は ACF2+ が `#e6a15c`、MPM が `#e6d36a`、pYIN が `#c792ea`、SwiftF0 が `#7ed0cb`、Tiny-CREPE が `#8eb6f0`、Basic Pitch の単音が `#f0a0b4`、重音が `#e07a6a` です。
+- 初期の検出器は ACF2+ です。線の色は ACF2+ が `#e6a15c`、MPM が `#e6d36a`、pYIN が `#c792ea`、SwiftF0 が `#7ed0cb`、Tiny-CREPE が `#8eb6f0`、Basic Pitch の単音が `#f0a0b4`、重音が `#e07a6a` です。ACF2+→Basic の選択枠は `#f2b48a` で、線は置き換え前が ACF2+、置き換え後が Basic Pitch 単音と同じ色です。
 - 大きな音名は、いちばん新しい点を基準音 A4 で MIDI 番号に直し、最も近い半音に丸めたものです。その横の cent は、その半音からのずれです。A4 の初期値は 440 Hz で、入力は 415〜466 Hz だけ受け付けます。
-- 無音の点では音名が「–」になります。ACF2+ 以外は信頼度を表示します。ACF2+ の有音は「ACF2+」、無音は「無音」です。Basic Pitch の重音で複数の音があるときは、音名を並べ、セントの位置に音の数を出します。
+- 無音の点では音名が「–」になります。ACF2+ と ACF2+→Basic 以外は信頼度を表示します。この 2 つの有音は「ACF2+」、無音は「無音」です。ACF2+→Basic の大きな音名は、置き換え前の右端だけを見ます。Basic Pitch の重音で複数の音があるときは、音名を並べ、セントの位置に音の数を出します。
 - 「グラフを消去」は画面上の点だけ消します。マイクは止めません。
 - 「CSV を保存」は、いまメモリにある点を `pitch.csv` としてダウンロードします。列は `time_s,detector,pitch_hz,midi,note,confidence,voiced` です。先頭に UTF-8 BOM を付けています。MIDI と音名は、保存した瞬間の A4 で計算します。Basic Pitch の重音は、同じ時刻の音を 1 行ずつ書きます。
 - 点は最大約 20 万件まで保持し、超えると古い方から削って約 18 万件に戻します。
@@ -62,6 +62,7 @@ src/graph.ts              キャンバスの五線とピッチ線
 src/style.css
 src/audio/engine.ts       マイク、検出器の選択、時刻
 src/audio/acf2.ts         ACF2+
+src/audio/acf-basic.ts    ACF2+ の暫定点を Basic Pitch で置き換える
 src/audio/mpm.ts          McLeod Pitch Method（pitchfinder）
 src/audio/pyin.ts         pYIN（@audio/pitch-pyin）
 src/audio/swiftf0.ts      SwiftF0 のストリーム制御（モデルは呼ばない）

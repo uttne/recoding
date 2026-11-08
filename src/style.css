@@ -6,6 +6,7 @@
   --muted: #b3a89a;
   --line: rgba(243, 234, 215, 0.16);
   --acf: #e6a15c;
+  --hybrid: #f2b48a;
   --swift: #7ed0cb;
   --mpm: #e6d36a;
   --pyin: #c792ea;
@@ -163,6 +164,7 @@ fieldset.limits legend {
 }
 .choice input:checked + span { background: #3a322a; color: var(--ink); }
 .choice:has(input[value="acf2"]:checked) span { box-shadow: inset 0 -2px var(--acf); }
+.choice:has(input[value="acf-basic"]:checked) span { box-shadow: inset 0 -2px var(--hybrid); }
 .choice:has(input[value="mpm"]:checked) span { box-shadow: inset 0 -2px var(--mpm); }
 .choice:has(input[value="pyin"]:checked) span { box-shadow: inset 0 -2px var(--pyin); }
 .choice:has(input[value="swiftf0"]:checked) span { box-shadow: inset 0 -2px var(--swift); }

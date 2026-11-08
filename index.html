@@ -31,6 +31,10 @@
             <span>ACF2+</span>
           </label>
           <label class="choice">
+            <input type="radio" name="detector" value="acf-basic" />
+            <span>ACF2+→Basic</span>
+          </label>
+          <label class="choice">
             <input type="radio" name="detector" value="mpm" />
             <span>MPM</span>
           </label>
@@ -101,7 +105,7 @@
       <p id="status" class="status">マイクの使用を許可すると、音程の線が右から流れます。</p>
       <canvas id="graph" width="1200" height="720"></canvas>
       <footer>
-        ACF2+、MPM、pYIN は時間領域です。SwiftF0、Tiny-CREPE、Basic Pitch はブラウザ内の ONNX Runtime が推論します。Basic Pitch の重音は同時に鳴っている音を別々の線にします。破線は選択中の検出器の下限と上限で、その外側は暗くなります。遅れて確定する検出器は、未確定の区間をその色で薄く塗ります。音は端末の外へ出ません。
+        ACF2+、MPM、pYIN は時間領域です。SwiftF0、Tiny-CREPE、Basic Pitch はブラウザ内の ONNX Runtime が推論します。ACF2+→Basic は右端を ACF2+ で描き、Basic Pitch が確定した過去へ置き換えます。置き換え前は ACF2+ の色、置き換え後は Basic Pitch の色です。Basic Pitch の重音は同時に鳴っている音を別々の線にします。破線は選択中の検出器の下限と上限で、その外側は暗くなります。遅れて確定する検出器は、未確定の区間をその色で薄く塗ります。音は端末の外へ出ません。
       </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>

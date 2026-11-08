@@ -1,3 +1,4 @@
+import { type RevisionFrame } from "./acf-basic";
 import { ACF_FMAX_HZ, acf2Plus, acfWindowSize } from "./acf2";
 import {
   BASIC_FMAX_HZ,
@@ -14,7 +15,7 @@ import { StreamResampler } from "./resample";
 import { inferSwift, loadSwiftSession } from "./swiftf0-session";
 import { SWIFT_FMAX, SWIFT_SAMPLE_RATE, SwiftF0Stream, type SwiftFrame } from "./swiftf0";
 
-export type DetectorId = "acf2" | "swiftf0" | "mpm" | "pyin" | "crepe" | "basic-mono" | "basic-poly";
+export type DetectorId = "acf2" | "acf-basic" | "swiftf0" | "mpm" | "pyin" | "crepe" | "basic-mono" | "basic-poly";
 
 export type PitchEvent = {
   hz: number;
@@ -28,10 +29,14 @@ export type PitchPoint = {
   detector: DetectorId;
   /** Loudest first. Present for Basic Pitch 重音 when at least one note is active. */
   pitches?: readonly PitchEvent[];
+  /** ACF2+→Basic only. True until a Basic Pitch frame replaces this point. */
+  provisional?: boolean;
 };
 
 type Handlers = {
   onPoint: (point: PitchPoint) => void;
+  /** Basic Pitch frames that replace the provisional ACF2+ trace. */
+  onRevise: (frames: RevisionFrame[]) => void;
   onClock: (time: number) => void;
   onLevel: (rms: number) => void;
   onStatus: (message: string) => void;
@@ -117,7 +122,7 @@ export class PitchEngine {
   preloadModel(): void {
     void this.prepareSwift();
     if (this.detectorId === "crepe") void this.prepareCrepe();
-    if (this.isBasic) void this.prepareBasic();
+    if (this.usesBasic) void this.prepareBasic();
   }
 
   async start(): Promise<void> {
@@ -186,6 +191,10 @@ export class PitchEngine {
     return this.detectorId === "basic-mono" || this.detectorId === "basic-poly";
   }
 
+  private get usesBasic(): boolean {
+    return this.isBasic || this.detectorId === "acf-basic";
+  }
+
   private basicMode(): BasicMode {
     return this.detectorId === "basic-poly" ? "poly" : "mono";
   }
@@ -193,14 +202,15 @@ export class PitchEngine {
   private runningStatus(): string {
     if (this.detectorId === "swiftf0" && !this.swiftReady) return "録音中。SwiftF0 はモデルの読み込み後に使えます";
     if (this.detectorId === "crepe" && !this.crepeReady) return "録音中。Tiny-CREPE はモデルの読み込み後に使えます";
+    if (this.detectorId === "acf-basic" && !this.basicReady) return "録音中。右端は ACF2+ です。過去の置き換えはモデルの読み込み後です";
     if (this.isBasic && !this.basicReady) return "録音中。Basic Pitch はモデルの読み込み後に使えます";
     return "録音中";
   }
 
   private announce(model: "swiftf0" | "crepe" | "basic"): boolean {
     if (model === "crepe") return this.detectorId === "crepe";
-    if (model === "basic") return this.isBasic;
-    return this.detectorId !== "crepe" && !this.isBasic;
+    if (model === "basic") return this.usesBasic;
+    return this.detectorId !== "crepe" && !this.usesBasic;
   }
 
   private async prepareSwift(): Promise<void> {
@@ -271,7 +281,7 @@ export class PitchEngine {
 
   private sync(): void {
     this.crepe?.setEnabled(this.running && this.detectorId === "crepe" && this.crepeReady);
-    this.basic?.setEnabled(this.running && this.isBasic && this.basicReady);
+    this.basic?.setEnabled(this.running && this.usesBasic && this.basicReady);
     if (this.detectorId === "pyin") this.ensurePyin();
     else this.pyin = null;
     if (this.detectorId === "swiftf0") this.attachSwift();
@@ -308,7 +318,7 @@ export class PitchEngine {
     this.handlers.onClock(time);
     this.handlers.onLevel(rms(chunk));
 
-    if (this.detectorId === "acf2" && time - this.lastAcfTime >= 0.016) {
+    if ((this.detectorId === "acf2" || this.detectorId === "acf-basic") && time - this.lastAcfTime >= 0.016) {
       const frame = this.ring.latest(acfWindowSize(sampleRate));
       if (frame) {
         this.lastAcfTime = time;
@@ -317,7 +327,8 @@ export class PitchEngine {
           time,
           hz: hz > 0 ? hz : null,
           confidence: hz > 0 ? 1 : 0,
-          detector: "acf2",
+          detector: this.detectorId,
+          provisional: this.detectorId === "acf-basic" ? true : undefined,
         });
       }
     }
@@ -385,6 +396,19 @@ export class PitchEngine {
   }
 
   private onBasic(frames: BasicFrame[]): void {
+    if (this.detectorId === "acf-basic") {
+      this.handlers.onRevise(
+        frames.map((frame) => {
+          const primary = frame.pitches[0];
+          return {
+            time: frame.time,
+            hz: primary ? primary.hz : null,
+            confidence: primary ? primary.confidence : 0,
+          };
+        }),
+      );
+      return;
+    }
     if (!this.isBasic) return;
     const detector = this.detectorId;
     for (const frame of frames) {

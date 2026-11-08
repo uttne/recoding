@@ -1,4 +1,5 @@
 import "./style.css";
+import { reviseHybrid } from "./audio/acf-basic";
 import { ACF_FMAX_HZ, ACF_FMIN_HZ } from "./audio/acf2";
 import { BASIC_FMAX_HZ, BASIC_FMIN_HZ } from "./audio/basicpitch";
 import { CREPE_FMAX_HZ, CREPE_FMIN_HZ } from "./audio/crepe";
@@ -22,10 +23,12 @@ const csvButton = document.querySelector<HTMLButtonElement>("#csv")!;
 const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;
 const detectorInputs = [...document.querySelectorAll<HTMLInputElement>('input[name="detector"]')];
 
-const LAGGING = new Set<DetectorId>(["swiftf0", "pyin", "crepe", "basic-mono", "basic-poly"]);
+const LAGGING = new Set<DetectorId>(["acf-basic", "swiftf0", "pyin", "crepe", "basic-mono", "basic-poly"]);
 const SCORED = new Set<DetectorId>(["swiftf0", "mpm", "pyin", "crepe", "basic-mono", "basic-poly"]);
 
-const limitInputs: Record<DetectorId, HTMLInputElement> = {
+type CeilingId = Exclude<DetectorId, "acf-basic">;
+
+const limitInputs: Record<CeilingId, HTMLInputElement> = {
   acf2: document.querySelector<HTMLInputElement>("#acf-fmax")!,
   swiftf0: document.querySelector<HTMLInputElement>("#swift-fmax")!,
   mpm: document.querySelector<HTMLInputElement>("#mpm-fmax")!,
@@ -37,6 +40,7 @@ const limitInputs: Record<DetectorId, HTMLInputElement> = {
 
 const floors: Record<DetectorId, number> = {
   acf2: ACF_FMIN_HZ,
+  "acf-basic": BASIC_FMIN_HZ,
   swiftf0: SWIFT_FMIN,
   mpm: MPM_FMIN_HZ,
   pyin: PYIN_FMIN_HZ,
@@ -52,13 +56,32 @@ let clock = 0;
 let engagedAt = 0;
 let a4 = 440;
 
+function trimPoints(): void {
+  if (points.length > 200_000) points.splice(0, points.length - 180_000);
+  csvButton.disabled = points.length === 0;
+}
+
 const engine = new PitchEngine({
   onPoint(point) {
     points.push(point);
-    confirmed.set(point.detector, point.time);
-    if (points.length > 200_000) points.splice(0, points.length - 180_000);
-    csvButton.disabled = points.length === 0;
+    if (!(point.detector === "acf-basic" && point.provisional)) confirmed.set(point.detector, point.time);
+    trimPoints();
     updateReadout(point);
+  },
+  onRevise(frames) {
+    const basicFmax = ceilings["basic-mono"];
+    const revised = reviseHybrid(points, frames, basicFmax, (point): PitchPoint => ({
+      time: point.time,
+      hz: point.hz,
+      confidence: point.confidence,
+      detector: "acf-basic",
+      provisional: point.provisional,
+    }));
+    points.length = 0;
+    points.push(...revised);
+    const until = frames.reduce((max, frame) => Math.max(max, frame.time), Number.NEGATIVE_INFINITY);
+    if (until > Number.NEGATIVE_INFINITY) confirmed.set("acf-basic", until);
+    trimPoints();
   },
   onClock(time) {
     clock = time;
@@ -73,6 +96,7 @@ const engine = new PitchEngine({
 
 const ceilings: Record<DetectorId, number> = {
   acf2: ACF_FMAX_HZ,
+  "acf-basic": Math.max(ACF_FMAX_HZ, BASIC_FMAX_HZ),
   swiftf0: SWIFT_FMAX,
   mpm: MPM_FMAX_HZ,
   pyin: PYIN_FMAX_HZ,
@@ -139,6 +163,7 @@ function commitLimit(input: HTMLInputElement, current: number): number {
 
 function applyCeilings(): void {
   engine.acfFmax = ceilings.acf2;
+  ceilings["acf-basic"] = Math.max(ceilings.acf2, ceilings["basic-mono"]);
   engine.swiftFmax = ceilings.swiftf0;
   engine.mpmFmax = ceilings.mpm;
   engine.pyinFmax = ceilings.pyin;
@@ -176,7 +201,7 @@ for (const input of detectorInputs) {
   });
 }
 
-for (const [id, input] of Object.entries(limitInputs) as [DetectorId, HTMLInputElement][]) {
+for (const [id, input] of Object.entries(limitInputs) as [CeilingId, HTMLInputElement][]) {
   if (id === "basic-poly") continue;
   input.value = String(Math.round(ceilings[id]));
   input.addEventListener("change", () => {

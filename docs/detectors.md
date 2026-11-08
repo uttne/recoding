@@ -1,6 +1,6 @@
 # 検出器
 
-ACF2+、MPM、pYIN、SwiftF0、Tiny-CREPE、Basic Pitch の単音は、1 フレームにつき 1 つの Hz を返します。和音を入れると、いちばんそれらしい成分が 1 つ返るだけで、音を分離しません。Basic Pitch の重音だけが、同じ時刻に複数の Hz を返します。音名への変換は検出のあと、`src/audio/notes.ts` が行います。
+ACF2+、ACF2+→Basic、MPM、pYIN、SwiftF0、Tiny-CREPE、Basic Pitch の単音は、1 フレームにつき 1 つの Hz を返します。和音を入れると、いちばんそれらしい成分が 1 つ返るだけで、音を分離しません。Basic Pitch の重音だけが、同じ時刻に複数の Hz を返します。音名への変換は検出のあと、`src/audio/notes.ts` が行います。
 
 ```text
 midi = 69 + 12 * log2(hz / a4)
@@ -16,8 +16,9 @@ type PitchPoint = {
   time: number;          // マイク開始からの秒
   hz: number | null;     // null は無音。重音ではいちばん強い音
   confidence: number;    // その点の信頼度。ACF2+ の有音は 1、無音は 0
-  detector: "acf2" | "mpm" | "pyin" | "swiftf0" | "crepe" | "basic-mono" | "basic-poly";
+  detector: "acf2" | "acf-basic" | "mpm" | "pyin" | "swiftf0" | "crepe" | "basic-mono" | "basic-poly";
   pitches?: { hz: number; confidence: number }[]; // Basic Pitch 重音だけ。強い順
+  provisional?: boolean; // ACF2+→Basic の置き換え前だけ true
 };
 ```
 
@@ -163,6 +164,26 @@ Spotify の Basic Pitch（ICASSP 2022）の `nmp.onnx` です。Apache-2.0 で�
 単音モードは、そのうちいちばん強い 1 音だけを `hz` にします。`pitches` は付けません。重音モードは全部を `pitches` に入れ、`hz` はいちばん強い音です。無音のフレームも点として出し、線を切ります。単音と重音は同じセッションで、復号のときに分かれます。
 
 テスト `src/audio/basicpitch.test.ts` はモデルを呼びません。ビン 145 が 440 Hz であること、三つの山が重音では強い順、単音ではいちばん強い音だけであること、上限 400 Hz で A4 が消えること、偽の推論で窓の中央から 440 Hz が出ることを見ています。
+
+## ACF2+→Basic
+
+ラジオの値は `acf-basic` です。右端は ACF2+、Basic Pitch の単音が返した時刻より前は Basic Pitch です。大きな音名は ACF2+ の点だけを更新します。遅れて届いたフレームでは音名を変えません。
+
+ACF2+ は、ACF2+ を単体で選んだときと同じ 16 ms 間隔です。上限も ACF2+ の入力を使います。点には `provisional: true` が付き、線の色は ACF2+ の `#e6a15c` です。
+
+Basic Pitch は単音の読み方だけを使います。モデルの読み込み、22050 Hz の窓、両端 15 フレームの切り捨ては Basic Pitch 単音と同じです。フレームが届くと `reviseHybrid`（`src/audio/acf-basic.ts`）が、そのフレームから半フレーム（`256 / 22050 / 2` 秒、約 5.8 ms）以内の暫定点を次の規則で置き換えます。
+
+1. フレームに音があるときは、その Hz を確定点にします。近くの暫定点は消します。線の色は Basic Pitch 単音の `#f0a0b4` です。
+2. フレームが無音で、近くの暫定点が Basic Pitch の上限より高いときは、その暫定点を残します。色は ACF2+ のままです。Basic Pitch のビンは MIDI 108 までなので、それより上は ACF2+ の値を残します。上限を下げたときも、その入力より高い暫定点を同じように残します。
+3. フレームが無音で、近くに上限以下の暫定点があるときは、無音の確定点にします。線はそこで切れます。
+4. 近くに暫定点が無い無音フレームは、点を足しません。
+5. 半フレームより離れた暫定点は残します。窓の両端を捨てた区間や、推論が遅れてフレームが飛んだ区間は、ACF2+ の色のままです。
+
+半音の半分を超える差では線を切ります。オクターブが違っていれば、置き換わったところで線が飛びます。半音の半分以内なら、色が変わっても線はつながります。未確定の帯は ACF2+ の色で、いちばん新しい Basic Pitch のフレームから右端までです。
+
+グラフの下限は Basic Pitch の 27.5 Hz、上限は ACF2+ と Basic Pitch の上限のうち高い方です。専用の上限入力はありません。
+
+テスト `src/audio/acf-basic.test.ts` はモデルを呼びません。1000 Hz の暫定点が 2000 Hz に置き換わること、上限 4186 Hz より高い 4500 Hz は無音フレームでも残ること、音があるフレームではその高い点を捨てること、上限以下の暫定点が無音になること、枠の外の点と他の検出器の点が残ること、暫定点の無い無音フレームは点を足さないことを見ています。
 
 ## 検出器を足すとき
 
