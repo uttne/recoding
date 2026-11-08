@@ -1,0 +1,20 @@
+{
+  "name": "pitch-recorder",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.21.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.7.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}

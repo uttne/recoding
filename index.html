@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ピッチレコーダー</title>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <div class="title-block">
+          <p class="eyebrow">単音の音程をリアルタイムに記録</p>
+          <h1>ピッチレコーダー</h1>
+        </div>
+        <div class="readout" aria-live="polite">
+          <div id="note" class="note">–</div>
+          <div class="meta">
+            <span id="hz">— Hz</span>
+            <span id="cents">— cent</span>
+            <span id="confidence">—</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="controls">
+        <button id="toggle" type="button">マイクを開始</button>
+        <fieldset>
+          <legend>検出</legend>
+          <label class="choice">
+            <input type="radio" name="detector" value="acf2" checked />
+            <span>ACF2+</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="detector" value="swiftf0" />
+            <span>SwiftF0</span>
+          </label>
+        </fieldset>
+        <label class="tune">
+          A4
+          <input id="a4" type="number" min="415" max="466" step="1" value="440" />
+          Hz
+        </label>
+        <div class="level" aria-hidden="true"><span id="level"></span></div>
+        <button id="csv" type="button" disabled>CSV を保存</button>
+        <button id="clear" type="button">グラフを消去</button>
+      </section>
+
+      <p id="status" class="status">マイクの使用を許可すると、音程の線が右から流れます。</p>
+      <canvas id="graph" width="1200" height="720"></canvas>
+      <footer>
+        ACF2+ は時間領域の自己相関です。SwiftF0 は Lars Nieradzik のモデル（MIT、16 kHz、確定まで 176 ms）で、ブラウザ内の ONNX Runtime が推論します。音は端末の外へ出ません。
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
