@@ -33,7 +33,7 @@ export class PitchGraph {
     this.canvas.height = Math.max(1, Math.floor(height * ratio));
   }
 
-  draw(points: PitchPoint[], now: number): void {
+  draw(points: PitchPoint[], now: number, pendingFrom: number | null = null): void {
     const { ctx, canvas } = this;
     const width = canvas.width;
     const height = canvas.height;
@@ -68,6 +68,17 @@ export class PitchGraph {
         ctx.fillStyle = "rgba(243,234,215,0.72)";
         ctx.textAlign = "right";
         ctx.fillText(`C${octave}`, plotLeft - 8 * ratio, y);
+      }
+    }
+
+    if (pendingFrom != null && pendingFrom < now) {
+      const start = now - WINDOW_SECONDS;
+      const xFor = (time: number) => plotLeft + ((time - start) / WINDOW_SECONDS) * plotWidth;
+      const x0 = Math.max(plotLeft, Math.min(plotLeft + plotWidth, xFor(pendingFrom)));
+      const x1 = plotLeft + plotWidth;
+      if (x1 > x0) {
+        ctx.fillStyle = "rgba(126, 208, 203, 0.12)";
+        ctx.fillRect(x0, plotTop, x1 - x0, plotHeight);
       }
     }
 

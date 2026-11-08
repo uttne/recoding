@@ -1,49 +1,90 @@
-import * as ort from "onnxruntime-web/wasm";
-import { SWIFT_FMAX, SWIFT_FMIN, type SwiftInference } from "./swiftf0";
+import { type SwiftInference, type SwiftWorkerResponse } from "./swiftf0";
 
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
-let configured = false;
+let worker: Worker | null = null;
+let ready: Promise<void> | null = null;
+let readyResolve: (() => void) | null = null;
+let readyReject: ((error: Error) => void) | null = null;
+let nextId = 0;
+let lastElapsedLog = 0;
 
-function configureRuntime(): void {
-  if (configured) return;
-  ort.env.wasm.numThreads = 1;
-  ort.env.wasm.wasmPaths = `${import.meta.env.BASE_URL}ort/`;
-  configured = true;
+const pending = new Map<number, { resolve: (value: SwiftInference) => void; reject: (error: Error) => void }>();
+
+function noteElapsed(elapsedMs: number): void {
+  const now = performance.now();
+  if (now - lastElapsedLog < 1000) return;
+  lastElapsedLog = now;
+  console.info(`SwiftF0 inference ${elapsedMs.toFixed(1)} ms`);
 }
 
-export function loadSwiftSession(): Promise<ort.InferenceSession> {
-  if (sessionPromise) return sessionPromise;
-  configureRuntime();
-  const pending = ort.InferenceSession.create(`${import.meta.env.BASE_URL}models/swift-f0.onnx`, {
-    executionProviders: ["wasm"],
-    graphOptimizationLevel: "all",
+function rejectReady(error: Error): void {
+  readyReject?.(error);
+  readyResolve = null;
+  readyReject = null;
+  ready = null;
+  for (const item of pending.values()) item.reject(error);
+  pending.clear();
+}
+
+function handleMessage(message: SwiftWorkerResponse): void {
+  if (message.type === "ready") {
+    readyResolve?.();
+    readyResolve = null;
+    readyReject = null;
+    return;
+  }
+  if (message.type === "result") {
+    const item = pending.get(message.id);
+    pending.delete(message.id);
+    noteElapsed(message.elapsedMs);
+    item?.resolve({ pitch: message.pitch, confidence: message.confidence });
+    return;
+  }
+  const error = new Error(message.message);
+  if (message.id != null) {
+    const item = pending.get(message.id);
+    pending.delete(message.id);
+    item?.reject(error);
+    return;
+  }
+  rejectReady(error);
+}
+
+function getWorker(): Worker {
+  if (worker) return worker;
+  const created = new Worker(new URL("./swiftf0.worker.ts", import.meta.url), { type: "module" });
+  created.onmessage = (event: MessageEvent<SwiftWorkerResponse>) => {
+    handleMessage(event.data);
+  };
+  created.onerror = (event) => {
+    rejectReady(new Error(event.message || "SwiftF0 のワーカーを開始できませんでした"));
+  };
+  worker = created;
+  return created;
+}
+
+export function loadSwiftSession(): Promise<void> {
+  if (ready) return ready;
+  const pendingReady = new Promise<void>((resolve, reject) => {
+    readyResolve = resolve;
+    readyReject = reject;
   });
-  sessionPromise = pending;
-  pending.catch(() => {
-    if (sessionPromise === pending) sessionPromise = null;
+  ready = pendingReady;
+  pendingReady.catch(() => {
+    if (ready === pendingReady) ready = null;
   });
-  return pending;
+  getWorker().postMessage({ type: "load" });
+  return pendingReady;
 }
 
-function asFloat64(data: ort.Tensor["data"]): Float64Array {
-  if (data instanceof Float64Array) return data;
-  return Float64Array.from(data as ArrayLike<number>);
-}
-
-function asFloat32(data: ort.Tensor["data"]): Float32Array {
-  if (data instanceof Float32Array) return new Float32Array(data);
-  return Float32Array.from(data as ArrayLike<number>);
-}
-
-export async function inferSwift(audio: Float32Array): Promise<SwiftInference> {
-  const session = await loadSwiftSession();
-  const output = await session.run({
-    audio: new ort.Tensor("float32", audio, [1, audio.length]),
-    fmin: new ort.Tensor("float32", Float32Array.of(SWIFT_FMIN), []),
-    fmax: new ort.Tensor("float32", Float32Array.of(SWIFT_FMAX), []),
-  });
-  const pitch = output.pitch;
-  const confidence = output.confidence;
-  if (!pitch || !confidence) throw new Error("SwiftF0 の出力テンソルがありません");
-  return { pitch: asFloat64(pitch.data), confidence: asFloat32(confidence.data) };
+export function inferSwift(audio: Float32Array): Promise<SwiftInference> {
+  return loadSwiftSession().then(
+    () =>
+      new Promise((resolve, reject) => {
+        const id = ++nextId;
+        // The stream reads this buffer again for the silence gate, so transfer a copy.
+        const copy = new Float32Array(audio);
+        pending.set(id, { resolve, reject });
+        getWorker().postMessage({ type: "infer", id, audio: copy }, [copy.buffer]);
+      }),
+  );
 }

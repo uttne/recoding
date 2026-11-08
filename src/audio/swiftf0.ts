@@ -24,6 +24,15 @@ export type SwiftFrame = {
 
 export type SwiftInferFn = (audio: Float32Array) => Promise<SwiftInference>;
 
+export type SwiftWorkerRequest =
+  | { type: "load" }
+  | { type: "infer"; id: number; audio: Float32Array };
+
+export type SwiftWorkerResponse =
+  | { type: "ready" }
+  | { type: "result"; id: number; pitch: Float64Array; confidence: Float32Array; elapsedMs: number }
+  | { type: "error"; message: string; id?: number };
+
 /**
  * Live SwiftF0 stream. A frame is emitted only after 10 later frames
  * (176 ms) have arrived, matching PitchStream in the reference package.

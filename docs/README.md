@@ -61,7 +61,8 @@ src/style.css
 src/audio/engine.ts       マイク、検出器の選択、時刻
 src/audio/acf2.ts         ACF2+
 src/audio/swiftf0.ts      SwiftF0 のストリーム制御（モデルは呼ばない）
-src/audio/swiftf0-session.ts  ONNX Runtime でモデルを実行
+src/audio/swiftf0-session.ts  推論を Worker へ渡す
+src/audio/swiftf0.worker.ts   ONNX Runtime でモデルを実行
 src/audio/resample.ts     16 kHz への変換
 src/audio/notes.ts        Hz と MIDI、音名
 src/onnxruntime-web-wasm.d.ts  wasm ビルドの型

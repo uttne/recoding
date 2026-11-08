@@ -13,7 +13,7 @@
                       └ Gain 0 → destination
                  └ PitchEngine.onChunk
                       ├ RingBuffer（直近 8192 サンプル）→ ACF2+
-                      └ StreamResampler → 16 kHz → SwiftF0Stream → ONNX
+                      └ StreamResampler → 16 kHz → SwiftF0Stream → Worker（ONNX）
                            └ 選択中の検出器の点だけ onPoint
                                 └ main.ts の points[]
                                      └ requestAnimationFrame で PitchGraph.draw
@@ -29,7 +29,7 @@ Worklet から `destination` まで繋がないと、ブラウザがこのグラ
 
 点の `time` は、マイク開始からの秒です。サンプル数を `AudioContext.sampleRate` で割った値で、`performance.now()` ではありません。
 
-SwiftF0 のフレーム時刻は 16 kHz ストリームの先頭が 0 秒です。モデルの準備が遅れてストリームを後から作った場合、`PitchEngine` が `swiftOrigin` を足し、マイク開始からの秒に揃えます。SwiftF0 の点は公式実装どおり 176 ms 遅れて確定するので、同じ瞬間の ACF2+ より左に出ます。
+SwiftF0 のフレーム時刻は 16 kHz ストリームの先頭が 0 秒です。モデルの準備が遅れてストリームを後から作った場合、`PitchEngine` が `swiftOrigin` を足し、マイク開始からの秒に揃えます。SwiftF0 の点は公式実装どおり 176 ms 遅れて確定するので、同じ瞬間の ACF2+ より左に出ます。推論は `src/audio/swiftf0.worker.ts` の `InferenceSession` が行います。メインスレッドは音声バッファのコピーを渡し、`pitch` と `confidence` を受け取ります。点の時刻は動かしません。
 
 描画の「今」は、直近チャンクの時刻と、最後の点の時刻の大きい方です。横軸は常にその「今」から 8 秒前までです。
 
@@ -60,6 +60,8 @@ ACF2+ は、選択中のときだけ 16 ms 以上間隔を空けて実行しま�
 
 `src/graph.ts` の縦軸は MIDI 30（F♯1 付近）から 108（C8）です。C の線だけ音名を左に出します。1 半音を超える飛び、50 ms を超える時間の空き、検出器の切り替わりでは線を切ります。範囲外の MIDI は上下の端に張り付きます。Hz 自体は点に残るので、CSV には範囲外の周波数も入ります。
 
+SwiftF0 を選択してマイクが動作しているあいだは、最後に確定した点から右端までを `#7ed0cb` のアルファ 0.12 で塗ります。点がまだ無いときは 0 秒から塗ります。この帯は未確定の区間であり、無音ではありません。停止中と ACF2+ の選択中は塗りません。
+
 `devicePixelRatio` に合わせてキャンバスの内部解像度を変えます。リサイズは `window` の `resize` だけを見ています。
 
 ## ONNX Runtime の置き場所
@@ -77,7 +79,7 @@ SwiftF0 は `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行�
 - `buildStart` で残っている `public/ort/` を消します。
 - `writeBundle` で本番の `dist/ort/` へコピーします。
 
-`src/audio/swiftf0-session.ts` はスレッド数を 1 に固定しています。共有メモリ用のマルチスレッドは使いません。開発サーバーと `vite preview` には、同じオリジン分離のため次のヘッダを付けています。
+セッションは Worker 内で作ります。`wasmPaths` はページ原点からの絶対 URL です。Worker の `location` はスクリプト自身を指すため、相対の `ort/` では WASM を取れません。スレッド数は 1 です。WebGPU と共有メモリ用のマルチスレッドは使いません。`session.run` の所要時間は、メインスレッドが 1 秒に 1 回まで `SwiftF0 inference … ms` とコンソールへ出します。開発サーバーと `vite preview` には、同じオリジン分離のため次のヘッダを付けています。
 
 - `Cross-Origin-Opener-Policy: same-origin`
 - `Cross-Origin-Embedder-Policy: require-corp`
@@ -97,9 +99,10 @@ SwiftF0 は `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行�
 | マイクの制約、16 ms の間隔 | `src/audio/engine.ts` |
 | ACF2+ の式やしきい値 | `src/audio/acf2.ts` と `src/audio/acf2.test.ts` |
 | SwiftF0 の先読みや無音ゲート | `src/audio/swiftf0.ts` と `src/audio/swiftf0.test.ts` |
-| モデルの入出力テンソル | `src/audio/swiftf0-session.ts` |
+| モデルの入出力テンソル | `src/audio/swiftf0.worker.ts` |
+| Worker との送受信 | `src/audio/swiftf0-session.ts` |
 | 16 kHz への変換 | `src/audio/resample.ts` |
 | 音名と MIDI の式 | `src/audio/notes.ts` |
-| WASM の配信パス | `vite.config.ts` と `swiftf0-session.ts` の `wasmPaths` |
+| WASM の配信パス | `vite.config.ts` と `swiftf0.worker.ts` の `wasmPaths` |
 
 Worklet は Vite のモジュールではなく `public/capture-worklet.js` です。`AudioWorkletGlobalScope` で動き、DOM や `src/` の import は使えません。ブロック長を変えるときは、メイン側が任意長の `Float32Array` を受け取れることを確認します。今の `onChunk` は長さを固定していません。

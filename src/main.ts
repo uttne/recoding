@@ -20,10 +20,12 @@ const graph = new PitchGraph(canvas);
 const points: PitchPoint[] = [];
 let clock = 0;
 let a4 = 440;
+let swiftConfirmedAt: number | null = null;
 
 const engine = new PitchEngine({
   onPoint(point) {
     points.push(point);
+    if (point.detector === "swiftf0") swiftConfirmedAt = point.time;
     if (points.length > 200_000) points.splice(0, points.length - 180_000);
     csvButton.disabled = points.length === 0;
     updateReadout(point);
@@ -55,8 +57,13 @@ function updateReadout(point: PitchPoint): void {
   confidenceLabel.textContent = point.detector === "swiftf0" ? `信頼度 ${point.confidence.toFixed(2)}` : "ACF2+";
 }
 
+function pendingFrom(): number | null {
+  if (!engine.running || engine.detector !== "swiftf0") return null;
+  return swiftConfirmedAt ?? 0;
+}
+
 function paint(): void {
-  graph.draw(points, Math.max(clock, points.at(-1)?.time ?? 0));
+  graph.draw(points, Math.max(clock, points.at(-1)?.time ?? 0), pendingFrom());
   requestAnimationFrame(paint);
 }
 
@@ -100,6 +107,7 @@ a4Input.addEventListener("change", () => {
 
 clearButton.addEventListener("click", () => {
   points.length = 0;
+  swiftConfirmedAt = null;
   csvButton.disabled = true;
   note.textContent = "–";
   hzLabel.textContent = "— Hz";
