@@ -6,13 +6,25 @@ import {
   BASIC_NOTE_BINS,
   BasicPitchStream,
   contourBinHz,
+  medianVoicedHz,
   readBasicFrame,
-  selectBasic,
+  readMonoFrames,
   type BasicInference,
+  type BasicReading,
 } from "./basicpitch";
 
 function cents(actual: number, expected: number): number {
   return 1200 * Math.log2(actual / expected);
+}
+
+function monoSequence(frames: Array<{ notes: Array<[number, number]>; contour: Array<[number, number]> }>): Array<BasicReading | null> {
+  const note = new Float32Array(frames.length * BASIC_NOTE_BINS);
+  const contour = new Float32Array(frames.length * BASIC_CONTOUR_BINS);
+  frames.forEach((frame, index) => {
+    for (const [bin, value] of frame.notes) note[index * BASIC_NOTE_BINS + bin] = value;
+    for (const [bin, value] of frame.contour) contour[index * BASIC_CONTOUR_BINS + bin] = value;
+  });
+  return readMonoFrames(note, contour, 0, frames.length, 27.5, BASIC_FMAX_HZ);
 }
 
 function activations(notes: Array<[number, number]>, contourBin: number): { note: Float32Array; contour: Float32Array } {
@@ -30,10 +42,9 @@ describe("Basic Pitch decode", () => {
     const readings = readBasicFrame(note, contour, 0, 27.5, BASIC_FMAX_HZ);
     expect(readings).toHaveLength(1);
     expect(Math.abs(cents(readings[0].hz, 440))).toBeLessThan(5);
-    expect(selectBasic(readings, "mono")).toEqual(readings);
   });
 
-  it("returns every chord tone in poly mode and only the loudest in mono mode", () => {
+  it("returns every chord tone in strength order", () => {
     const { note, contour } = activations(
       [
         [48, 0.55],
@@ -45,18 +56,97 @@ describe("Basic Pitch decode", () => {
     contour[52 * 3 + 1] = 0.8;
     contour[55 * 3 + 1] = 0.8;
     const readings = readBasicFrame(note, contour, 0, 27.5, BASIC_FMAX_HZ);
-    expect(selectBasic(readings, "poly").map((reading) => Math.round(reading.hz))).toEqual([
+    expect(readings.map((reading) => Math.round(reading.hz))).toEqual([
       Math.round(contourBinHz(55 * 3 + 1)),
       Math.round(contourBinHz(52 * 3 + 1)),
       Math.round(contourBinHz(48 * 3 + 1)),
     ]);
-    expect(selectBasic(readings, "mono")).toHaveLength(1);
-    expect(selectBasic(readings, "mono")[0].confidence).toBeCloseTo(0.9);
   });
 
   it("drops notes outside the ceiling", () => {
     const { note, contour } = activations([[48, 0.9]], 145);
     expect(readBasicFrame(note, contour, 0, 27.5, 400)).toEqual([]);
+    expect(readMonoFrames(note, contour, 0, 1, 27.5, 400)).toEqual([null]);
+  });
+
+  it("holds a steady contour ridge on bin 145 at 440 Hz", () => {
+    const readings = monoSequence([{ notes: [[48, 0.8]], contour: [[145, 0.9]] }]);
+    expect(readings[0]).not.toBeNull();
+    expect(Math.abs(cents(readings[0]!.hz, 440))).toBeLessThan(5);
+  });
+
+  it("follows a ridge across semitones instead of stepping with the note head", () => {
+    const bins = [145, 147, 149, 152, 155];
+    const readings = monoSequence(
+      bins.map((bin) => ({
+        notes: [[Math.round((bin - 1) / 3), 0.8]],
+        contour: [[bin, 0.9]],
+      })),
+    );
+    for (let index = 0; index < bins.length; index++) {
+      expect(readings[index]).not.toBeNull();
+      expect(Math.abs(cents(readings[index]!.hz, contourBinHz(bins[index])))).toBeLessThan(5);
+    }
+    expect(Math.abs(cents(readings[1]!.hz, 440))).toBeGreaterThan(50);
+    const smoothed = medianVoicedHz(readings.map((reading) => reading?.hz ?? null));
+    expect(Math.abs(cents(smoothed[2]!, contourBinHz(149)))).toBeLessThan(5);
+    expect(Math.abs(cents(smoothed[2]!, contourBinHz(148)))).toBeGreaterThan(20);
+  });
+
+  it("keeps following the ridge after it leaves the original semitone window", () => {
+    const readings = monoSequence([
+      { notes: [[48, 0.9]], contour: [[145, 0.9]] },
+      {
+        notes: [
+          [48, 0.9],
+          [50, 0.45],
+        ],
+        contour: [[151, 0.9]],
+      },
+    ]);
+    expect(Math.abs(cents(readings[1]!.hz, contourBinHz(151)))).toBeLessThan(5);
+    expect(Math.abs(cents(readings[1]!.hz, 440))).toBeGreaterThan(150);
+  });
+
+  it("prefers the ridge near the previous pitch over a louder neighbor", () => {
+    const readings = monoSequence([
+      { notes: [[48, 0.8]], contour: [[145, 0.9]] },
+      { notes: [[49, 0.8]], contour: [[145, 0.4], [149, 0.95]] },
+    ]);
+    expect(Math.abs(cents(readings[1]!.hz, 440))).toBeLessThan(5);
+  });
+
+  it("is silent when the note head is more than a semitone from the ridge", () => {
+    expect(monoSequence([{ notes: [[50, 0.9]], contour: [[145, 0.9]] }])).toEqual([null]);
+    expect(monoSequence([{ notes: [[48, 0.9]], contour: [[181, 0.9]] }])).toEqual([null]);
+    const edge = monoSequence([{ notes: [[49, 0.8]], contour: [[145, 0.9]] }]);
+    expect(edge[0]).not.toBeNull();
+    expect(Math.abs(cents(edge[0]!.hz, 440))).toBeLessThan(5);
+  });
+
+  it("does not fall back to the semitone when the contour is empty", () => {
+    const note = new Float32Array(BASIC_NOTE_BINS);
+    note[48] = 0.9;
+    expect(readMonoFrames(note, new Float32Array(BASIC_CONTOUR_BINS), 0, 1, 27.5, BASIC_FMAX_HZ)).toEqual([null]);
+  });
+
+  it("does not mix pitches on either side of silence", () => {
+    const readings = monoSequence([
+      { notes: [[48, 0.8]], contour: [[145, 0.9]] },
+      { notes: [], contour: [] },
+      { notes: [[60, 0.8]], contour: [[181, 0.9]] },
+    ]);
+    const smoothed = medianVoicedHz(readings.map((reading) => reading?.hz ?? null));
+    expect(Math.abs(cents(smoothed[0]!, 440))).toBeLessThan(5);
+    expect(smoothed[1]).toBeNull();
+    expect(Math.abs(cents(smoothed[2]!, 880))).toBeLessThan(5);
+
+    const mixed = medianVoicedHz([430, 450, null, 860, 900]);
+    expect(mixed[0]).toBeCloseTo(440, 5);
+    expect(mixed[1]).toBeCloseTo(440, 5);
+    expect(mixed[2]).toBeNull();
+    expect(mixed[3]).toBeCloseTo(880, 5);
+    expect(mixed[4]).toBeCloseTo(880, 5);
   });
 
   it("emits A4 from the middle of a sliding window", async () => {

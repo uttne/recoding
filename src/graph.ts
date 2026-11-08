@@ -22,6 +22,13 @@ function traceColor(detector: DetectorId, provisional: boolean): string {
   return COLOR[detector];
 }
 
+/** Semitones a segment may rise or fall before the line breaks. */
+function joinLimit(detector: DetectorId, previousProvisional: boolean, provisional: boolean): number {
+  if (detector === "basic-mono" || detector === "basic-poly") return 0.75;
+  if (detector === "acf-basic" && !previousProvisional && !provisional) return 0.75;
+  return 0.5;
+}
+
 const LIMIT_LABEL: Record<DetectorId, string> = {
   acf2: "ACF2+",
   "acf-basic": "ACF→Basic",
@@ -169,17 +176,17 @@ export class PitchGraph {
         continue;
       }
       const provisional = point.provisional === true;
-      const limit = point.detector === "basic-mono" || point.detector === "basic-poly" ? 0.75 : 0.5;
       const used = new Set<number>();
       const next: Open[] = [];
       for (const hz of freqs) {
         const midi = hzToMidi(hz, this.a4);
         let best = -1;
-        let bestDist = limit;
+        let bestDist = Number.POSITIVE_INFINITY;
         for (let i = 0; i < open.length; i++) {
           if (used.has(i) || open[i].detector !== point.detector || x - open[i].x > maxGap) continue;
+          const limit = joinLimit(point.detector, open[i].provisional, provisional);
           const dist = Math.abs(midi - open[i].midi);
-          if (dist <= bestDist) {
+          if (dist <= limit && dist <= bestDist) {
             best = i;
             bestDist = dist;
           }

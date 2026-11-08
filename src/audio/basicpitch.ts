@@ -18,6 +18,14 @@ export const BASIC_FRAME_THRESHOLD = 0.3;
 export const BASIC_EDGE_FRAMES = 15;
 export const BASIC_MAX_NOTES = 8;
 export const BASIC_HOP_SECONDS = 0.25;
+/** Contour bins in one equal-tempered semitone. Bin `n * 3 + 1` is MIDI `21 + n`. */
+const CONTOUR_BINS_PER_SEMITONE = 3;
+/** Mono search around the previous ridge. An ordinary glissando moves far less than this per frame. */
+const RIDGE_RADIUS_BINS = 2 * CONTOUR_BINS_PER_SEMITONE;
+/** Note heads farther than this from the ridge do not count as support. */
+const NOTE_GATE_BINS = CONTOUR_BINS_PER_SEMITONE;
+/** Half-width of the mono median. Five frames is about 58 ms. */
+const MONO_MEDIAN_RADIUS = 2;
 
 const BASIC_F0 = 27.5;
 
@@ -60,6 +68,27 @@ export type BasicWorkerResponse =
   | { type: "result"; id: number; note: Float32Array; contour: Float32Array; elapsedMs: number }
   | { type: "error"; message: string; id?: number };
 
+function frequencyBounds(fmin: number, fmax: number): { floor: number; ceiling: number } {
+  const floor = Number.isFinite(fmin) && fmin > 0 ? fmin : BASIC_FMIN_HZ;
+  const ceiling = Number.isFinite(fmax) && fmax > floor ? fmax : BASIC_FMAX_HZ;
+  return { floor, ceiling };
+}
+
+type Peak = { bin: number; value: number };
+
+function notePeaks(note: ArrayLike<number>, frame: number): Peak[] {
+  const base = frame * BASIC_NOTE_BINS;
+  const found: Peak[] = [];
+  for (let bin = 0; bin < BASIC_NOTE_BINS; bin++) {
+    const value = note[base + bin];
+    if (value < BASIC_FRAME_THRESHOLD) continue;
+    const left = bin === 0 ? -Infinity : note[base + bin - 1];
+    const right = bin === BASIC_NOTE_BINS - 1 ? -Infinity : note[base + bin + 1];
+    if (value >= left && value > right) found.push({ bin, value });
+  }
+  return found;
+}
+
 export function readBasicFrame(
   note: ArrayLike<number>,
   contour: ArrayLike<number>,
@@ -67,27 +96,15 @@ export function readBasicFrame(
   fmin: number,
   fmax: number,
 ): BasicReading[] {
-  const floor = Number.isFinite(fmin) && fmin > 0 ? fmin : BASIC_FMIN_HZ;
-  const ceiling = Number.isFinite(fmax) && fmax > floor ? fmax : BASIC_FMAX_HZ;
-  const base = frame * BASIC_NOTE_BINS;
+  const { floor, ceiling } = frequencyBounds(fmin, fmax);
   const found: BasicReading[] = [];
-  for (let bin = 0; bin < BASIC_NOTE_BINS; bin++) {
-    const value = note[base + bin];
-    if (value < BASIC_FRAME_THRESHOLD) continue;
-    const left = bin === 0 ? -Infinity : note[base + bin - 1];
-    const right = bin === BASIC_NOTE_BINS - 1 ? -Infinity : note[base + bin + 1];
-    if (!(value >= left && value > right)) continue;
-    const hz = refineHz(bin, contour, frame);
+  for (const peak of notePeaks(note, frame)) {
+    const hz = refineHz(peak.bin, contour, frame);
     if (hz < floor || hz > ceiling) continue;
-    found.push({ hz, confidence: value });
+    found.push({ hz, confidence: peak.value });
   }
   found.sort((a, b) => b.confidence - a.confidence);
   return found.slice(0, BASIC_MAX_NOTES);
-}
-
-export function selectBasic(readings: BasicReading[], mode: BasicMode): BasicReading[] {
-  if (mode === "mono") return readings.length > 0 ? [readings[0]] : [];
-  return readings;
 }
 
 function refineHz(noteBin: number, contour: ArrayLike<number>, frame: number): number {
@@ -105,6 +122,151 @@ function refineHz(noteBin: number, contour: ArrayLike<number>, frame: number): n
   }
   if (mass <= 0) return noteBinHz(noteBin);
   return contourBinHz(weighted / mass);
+}
+
+function contourPeaks(contour: ArrayLike<number>, frame: number, start: number, end: number): Peak[] {
+  const base = frame * BASIC_CONTOUR_BINS;
+  const found: Peak[] = [];
+  for (let bin = start; bin <= end; bin++) {
+    const value = contour[base + bin];
+    if (value <= 0) continue;
+    const left = bin === 0 ? -Infinity : contour[base + bin - 1];
+    const right = bin === BASIC_CONTOUR_BINS - 1 ? -Infinity : contour[base + bin + 1];
+    if (value >= left && value > right) found.push({ bin, value });
+  }
+  return found;
+}
+
+/** Center of mass of one contour peak, including the shoulders that still fall away from it. */
+function ridgeCentroid(contour: ArrayLike<number>, frame: number, peakBin: number): number {
+  const base = frame * BASIC_CONTOUR_BINS;
+  let left = peakBin;
+  while (left > 0 && peakBin - left < 4) {
+    const next = contour[base + left - 1];
+    if (next <= 0 || next > contour[base + left]) break;
+    left--;
+  }
+  let right = peakBin;
+  while (right < BASIC_CONTOUR_BINS - 1 && right - peakBin < 4) {
+    const next = contour[base + right + 1];
+    if (next <= 0 || next > contour[base + right]) break;
+    right++;
+  }
+  let weighted = 0;
+  let mass = 0;
+  for (let bin = left; bin <= right; bin++) {
+    const weight = contour[base + bin];
+    if (weight <= 0) continue;
+    weighted += weight * bin;
+    mass += weight;
+  }
+  return mass > 0 ? weighted / mass : peakBin;
+}
+
+function ridgeFrom(
+  note: ArrayLike<number>,
+  contour: ArrayLike<number>,
+  frame: number,
+  anchorBin: number,
+  floor: number,
+  ceiling: number,
+): (BasicReading & { bin: number }) | null {
+  const center = Math.round(anchorBin);
+  const start = Math.max(0, center - RIDGE_RADIUS_BINS);
+  const end = Math.min(BASIC_CONTOUR_BINS - 1, center + RIDGE_RADIUS_BINS);
+  let peaks = contourPeaks(contour, frame, start, end);
+  if (peaks.length === 0) {
+    const base = frame * BASIC_CONTOUR_BINS;
+    let bestBin = -1;
+    let best = 0;
+    for (let bin = start; bin <= end; bin++) {
+      const value = contour[base + bin];
+      if (value > best) {
+        best = value;
+        bestBin = bin;
+      }
+    }
+    if (bestBin < 0) return null;
+    peaks = [{ bin: bestBin, value: best }];
+  }
+  peaks.sort((a, b) => Math.abs(a.bin - anchorBin) - Math.abs(b.bin - anchorBin) || b.value - a.value);
+  const ridgeBin = ridgeCentroid(contour, frame, peaks[0].bin);
+  let confidence = 0;
+  for (const peak of notePeaks(note, frame)) {
+    if (Math.abs(peak.bin * CONTOUR_BINS_PER_SEMITONE + 1 - ridgeBin) <= NOTE_GATE_BINS) {
+      confidence = Math.max(confidence, peak.value);
+    }
+  }
+  if (confidence < BASIC_FRAME_THRESHOLD) return null;
+  const hz = contourBinHz(ridgeBin);
+  if (hz < floor || hz > ceiling) return null;
+  return { hz, confidence, bin: ridgeBin };
+}
+
+function readMonoFrame(
+  note: ArrayLike<number>,
+  contour: ArrayLike<number>,
+  frame: number,
+  fmin: number,
+  fmax: number,
+  anchorBin: number | null,
+): (BasicReading & { bin: number }) | null {
+  const { floor, ceiling } = frequencyBounds(fmin, fmax);
+  if (anchorBin != null) return ridgeFrom(note, contour, frame, anchorBin, floor, ceiling);
+  const peaks = notePeaks(note, frame).sort((a, b) => b.value - a.value);
+  for (const peak of peaks) {
+    const reading = ridgeFrom(note, contour, frame, peak.bin * CONTOUR_BINS_PER_SEMITONE + 1, floor, ceiling);
+    if (reading) return reading;
+  }
+  return null;
+}
+
+/**
+ * Mono pitch for frames `[start, end)`. Hz is the contour peak nearest the
+ * previous frame, not the semitone bin of the note head. The first voiced
+ * frame starts at the strongest note head. A frame whose nearest note head is
+ * more than a semitone from that peak is silence.
+ */
+export function readMonoFrames(
+  note: ArrayLike<number>,
+  contour: ArrayLike<number>,
+  start: number,
+  end: number,
+  fmin: number,
+  fmax: number,
+): Array<BasicReading | null> {
+  const readings: Array<BasicReading | null> = [];
+  let anchor: number | null = null;
+  for (let frame = start; frame < end; frame++) {
+    const reading = readMonoFrame(note, contour, frame, fmin, fmax, anchor);
+    anchor = reading ? reading.bin : null;
+    readings.push(reading ? { hz: reading.hz, confidence: reading.confidence } : null);
+  }
+  return readings;
+}
+
+/**
+ * Median of up to five frames. The window stops at silence, so the pitch
+ * before a gap is not mixed with the pitch after it.
+ */
+export function medianVoicedHz(values: Array<number | null>, radius = MONO_MEDIAN_RADIUS): Array<number | null> {
+  const out: Array<number | null> = [];
+  for (let index = 0; index < values.length; index++) {
+    if (values[index] == null) {
+      out.push(null);
+      continue;
+    }
+    let lo = index;
+    let hi = index;
+    while (lo > index - radius && values[lo - 1] != null) lo--;
+    while (hi < index + radius && values[hi + 1] != null) hi++;
+    const window: number[] = [];
+    for (let cursor = lo; cursor <= hi; cursor++) window.push(values[cursor] as number);
+    window.sort((a, b) => a - b);
+    const mid = Math.floor(window.length / 2);
+    out.push(window.length % 2 === 1 ? window[mid] : (window[mid - 1] + window[mid]) / 2);
+  }
+  return out;
 }
 
 /**
@@ -185,11 +347,28 @@ export class BasicPitchStream {
       const hop = BASIC_FFT_HOP / BASIC_SAMPLE_RATE;
       const frames: BasicFrame[] = [];
       const last = BASIC_FRAMES - BASIC_EDGE_FRAMES;
-      for (let frame = BASIC_EDGE_FRAMES; frame < last; frame++) {
-        const time = windowStart + frame * hop;
-        if (time <= this.emittedUntil + 1e-4) continue;
-        const pitches = selectBasic(readBasicFrame(output.note, output.contour, frame, BASIC_FMIN_HZ, ceiling), mode);
-        frames.push({ time, pitches });
+      if (mode === "mono") {
+        const decoded = readMonoFrames(output.note, output.contour, BASIC_EDGE_FRAMES, last, BASIC_FMIN_HZ, ceiling);
+        const smoothed = medianVoicedHz(decoded.map((reading) => (reading ? reading.hz : null)));
+        for (let i = 0; i < decoded.length; i++) {
+          const time = windowStart + (BASIC_EDGE_FRAMES + i) * hop;
+          if (time <= this.emittedUntil + 1e-4) continue;
+          const reading = decoded[i];
+          const hz = smoothed[i];
+          frames.push({
+            time,
+            pitches: reading && hz != null ? [{ hz, confidence: reading.confidence }] : [],
+          });
+        }
+      } else {
+        for (let frame = BASIC_EDGE_FRAMES; frame < last; frame++) {
+          const time = windowStart + frame * hop;
+          if (time <= this.emittedUntil + 1e-4) continue;
+          frames.push({
+            time,
+            pitches: readBasicFrame(output.note, output.contour, frame, BASIC_FMIN_HZ, ceiling),
+          });
+        }
       }
       const newest = frames.at(-1);
       if (newest) this.emittedUntil = newest.time;
