@@ -19,7 +19,8 @@
                       └ StreamResampler → 22050 Hz → BasicPitchStream → Worker
                            └ 選択中の検出器の点だけ onPoint
                                 └ main.ts の points[]
-                                     └ requestAnimationFrame で PitchGraph.draw
+                                     ├ requestAnimationFrame で PitchGraph.draw
+                                     └ 同じ点と、チャンクごとの RMS → LoudnessGraph.draw
 ```
 
 Worklet から `destination` まで繋がないと、ブラウザがこのグラフを処理しないことがあります。音をスピーカーへ戻さないため、間の Gain は 0 です。
@@ -70,6 +71,8 @@ SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始
 SwiftF0、pYIN、Tiny-CREPE、Basic Pitch、ACF2+→Basic を選択してマイクが動作しているあいだは、最後に確定した点から右端までを、その検出器の色のアルファ 0.12 で塗ります。ACF2+→Basic の帯だけは ACF2+ の色で、いちばん新しい Basic Pitch のフレームから右端までです。その検出器へ切り替えたあとまだ点が無いときは、切り替えた時刻から塗ります。この帯は未確定の区間であり、無音ではありません。停止中と、ACF2+ または MPM の選択中は塗りません。
 
 `devicePixelRatio` に合わせてキャンバスの内部解像度を変えます。リサイズは `window` の `resize` だけを見ています。
+
+その下に、横軸をピッチ、縦軸を大きさにしたグラフがあります。ピッチの範囲は時間のグラフと同じです。縦軸は -60 dBFS から 0 dBFS で、点の時刻に最も近いチャンクの RMS を `20 log10` で換算します。50 ms より離れたチャンクしか無い点と、-60 dBFS 未満は出しません。直近 8 秒の有音を点で示し、新しい点ほど濃くします。いちばん新しい時刻が 0.35 秒以内のときは、その点を大きく描きます。Basic Pitch の重音は、各音をその瞬間の入力の大きさで同じ高さに置きます。選択中の検出器の下限と上限は縦の破線で、外側は暗くなります。`main.ts` は直近約 9 秒の RMS を `points` とは別に保持します。
 
 ## ONNX Runtime の置き場所
 

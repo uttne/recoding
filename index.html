@@ -103,7 +103,9 @@
       </section>
 
       <p id="status" class="status">マイクの使用を許可すると、音程の線が右から流れます。</p>
-      <canvas id="graph" width="1200" height="720"></canvas>
+      <canvas id="graph" width="1200" height="640" aria-label="時間とピッチ。横軸は直近8秒、縦軸は音程"></canvas>
+      <p class="graph-note">横軸はピッチ、縦軸はマイク入力の大きさ（dBFS）です。直近 8 秒の有音を、上の線と同じ色の点で示します。新しい点ほど濃くなります。</p>
+      <canvas id="loudness" width="1200" height="280" aria-label="ピッチと音の大きさ。横軸は音程、縦軸は入力の大きさ"></canvas>
       <footer>
         ACF2+、MPM、pYIN は時間領域です。SwiftF0、Tiny-CREPE、Basic Pitch はブラウザ内の ONNX Runtime が推論します。ACF2+→Basic は右端を ACF2+ で描き、Basic Pitch が確定した過去へ置き換えます。置き換え前は ACF2+ の色、置き換え後は Basic Pitch の色です。Basic Pitch の重音は同時に鳴っている音を別々の線にします。破線は選択中の検出器の下限と上限で、その外側は暗くなります。遅れて確定する検出器は、未確定の区間をその色で薄く塗ります。音は端末の外へ出ません。
       </footer>

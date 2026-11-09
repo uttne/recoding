@@ -1,9 +1,9 @@
 import { hzToMidi, noteName } from "./audio/notes";
 import type { DetectorId, PitchPoint } from "./audio/engine";
 
-const MIDI_LOW = 30;
-const MIDI_HIGH = 108;
-const WINDOW_SECONDS = 8;
+export const MIDI_LOW = 30;
+export const MIDI_HIGH = 108;
+export const WINDOW_SECONDS = 8;
 const GUTTER = 56;
 
 const COLOR: Record<DetectorId, string> = {
@@ -20,6 +20,28 @@ const COLOR: Record<DetectorId, string> = {
 function traceColor(detector: DetectorId, provisional: boolean): string {
   if (detector === "acf-basic") return provisional ? COLOR.acf2 : COLOR["basic-mono"];
   return COLOR[detector];
+}
+
+export function pointColor(detector: DetectorId, provisional: boolean): string {
+  return traceColor(detector, provisional);
+}
+
+export function detectorColor(detector: DetectorId): string {
+  return COLOR[detector];
+}
+
+export function detectorLimitLabel(detector: DetectorId): string {
+  return LIMIT_LABEL[detector];
+}
+
+/** Top of the pitch axis. Grows when a detector ceiling sits above C8. */
+export function viewMidiHigh(ranges: GraphRanges | undefined, a4: number): number {
+  if (!ranges) return MIDI_HIGH;
+  let high = MIDI_HIGH;
+  for (const range of Object.values(ranges.byDetector)) {
+    high = Math.max(high, Math.ceil(hzToMidi(range.fmax, a4) + 1));
+  }
+  return high;
 }
 
 /** Semitones a segment may rise or fall before the line breaks. */
@@ -78,8 +100,7 @@ export class PitchGraph {
   draw(points: PitchPoint[], now: number, frame: GraphFrame = {}): void {
     const pendingFrom = frame.pendingFrom ?? null;
     const ranges = frame.ranges;
-    const tops = ranges ? Object.values(ranges.byDetector).map((range) => hzToMidi(range.fmax, this.a4)) : [];
-    this.midiHigh = Math.max(MIDI_HIGH, ...tops.map((midi) => Math.ceil(midi + 1)));
+    this.midiHigh = viewMidiHigh(ranges, this.a4);
     const { ctx, canvas } = this;
     const width = canvas.width;
     const height = canvas.height;
@@ -264,7 +285,7 @@ export class PitchGraph {
     ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
     ctx.textAlign = align;
     ctx.textBaseline = y + 16 * ratio > top + height ? "bottom" : "top";
-    const label = `${LIMIT_LABEL[detector]} ${edge} ${noteName(hzToMidi(hz, this.a4))}`;
+    const label = `${detectorLimitLabel(detector)} ${edge} ${noteName(hzToMidi(hz, this.a4))}`;
     const x = align === "left" ? left + 10 * ratio : left + width - 10 * ratio;
     const textY = ctx.textBaseline === "top" ? y + 5 * ratio : y - 5 * ratio;
     ctx.fillText(label, x, textY);

@@ -8,7 +8,9 @@ import { MPM_FMAX_HZ, MPM_FMIN_HZ } from "./audio/mpm";
 import { centsOff, hzToMidi, noteName } from "./audio/notes";
 import { PYIN_FMAX_HZ, PYIN_FMIN_HZ } from "./audio/pyin";
 import { SWIFT_FMAX, SWIFT_FMIN } from "./audio/swiftf0";
-import { PitchGraph, type FrequencyRange, type GraphRanges } from "./graph";
+import { PitchGraph, WINDOW_SECONDS, type FrequencyRange, type GraphRanges } from "./graph";
+import { LoudnessGraph } from "./loudness-graph";
+import type { LevelSample } from "./loudness";
 
 const toggle = document.querySelector<HTMLButtonElement>("#toggle")!;
 const status = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -18,6 +20,7 @@ const centsLabel = document.querySelector<HTMLSpanElement>("#cents")!;
 const confidenceLabel = document.querySelector<HTMLSpanElement>("#confidence")!;
 const level = document.querySelector<HTMLSpanElement>("#level")!;
 const canvas = document.querySelector<HTMLCanvasElement>("#graph")!;
+const loudnessCanvas = document.querySelector<HTMLCanvasElement>("#loudness")!;
 const a4Input = document.querySelector<HTMLInputElement>("#a4")!;
 const csvButton = document.querySelector<HTMLButtonElement>("#csv")!;
 const clearButton = document.querySelector<HTMLButtonElement>("#clear")!;
@@ -50,7 +53,9 @@ const floors: Record<DetectorId, number> = {
 };
 
 const graph = new PitchGraph(canvas);
+const loudness = new LoudnessGraph(loudnessCanvas);
 const points: PitchPoint[] = [];
+const levels: LevelSample[] = [];
 const confirmed = new Map<DetectorId, number>();
 let clock = 0;
 let engagedAt = 0;
@@ -88,6 +93,11 @@ const engine = new PitchEngine({
   },
   onLevel(rms) {
     level.style.width = `${Math.min(100, rms * 280)}%`;
+    levels.push({ time: clock, rms });
+    const cutoff = clock - WINDOW_SECONDS - 1;
+    let drop = 0;
+    while (drop < levels.length && levels[drop].time < cutoff) drop++;
+    if (drop > 0) levels.splice(0, drop);
   },
   onStatus(message) {
     status.textContent = message;
@@ -145,7 +155,10 @@ function ranges(): GraphRanges {
 }
 
 function paint(): void {
-  graph.draw(points, Math.max(clock, points.at(-1)?.time ?? 0), { pendingFrom: pendingFrom(), ranges: ranges() });
+  const now = Math.max(clock, points.at(-1)?.time ?? 0);
+  const frame = { pendingFrom: pendingFrom(), ranges: ranges() };
+  graph.draw(points, now, frame);
+  loudness.draw(points, levels, now, frame);
   requestAnimationFrame(paint);
 }
 
@@ -220,6 +233,7 @@ a4Input.addEventListener("change", () => {
   }
   a4 = value;
   graph.setA4(a4);
+  loudness.setA4(a4);
 });
 
 clearButton.addEventListener("click", () => {
@@ -271,6 +285,10 @@ csvButton.addEventListener("click", () => {
 
 applyCeilings();
 graph.resize();
-window.addEventListener("resize", () => graph.resize());
+loudness.resize();
+window.addEventListener("resize", () => {
+  graph.resize();
+  loudness.resize();
+});
 engine.preloadModel();
 requestAnimationFrame(paint);
