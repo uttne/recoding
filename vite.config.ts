@@ -30,8 +30,35 @@ function ortRuntime(): Plugin {
   };
 }
 
+/** libflac's loader fetches a sibling wasm file. Point that fetch at the asset Vite emits. */
+function flacWasm(): Plugin {
+  const needle = `var wasmBinaryFile = 'libflac.wasm.wasm';
+if (!isDataURI(wasmBinaryFile)) {
+  wasmBinaryFile = locateFile(wasmBinaryFile);
+}`;
+  return {
+    name: "flac-wasm",
+    transform(code, id) {
+      if (!id.replaceAll("\\", "/").includes("/libflacjs/dist/libflac.wasm.js")) return;
+      const normalized = code.replaceAll("\r\n", "\n");
+      if (normalized.includes("flacWasmUrl") || !normalized.includes(needle)) return;
+      return {
+        code: `import flacWasmUrl from "libflacjs/dist/libflac.wasm.wasm?url";\n${normalized.replace(needle, "var wasmBinaryFile = flacWasmUrl;")}`,
+        map: null,
+      };
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [ortRuntime()],
+  plugins: [ortRuntime(), flacWasm()],
+  optimizeDeps: {
+    exclude: ["libflacjs"],
+  },
+  worker: {
+    format: "es",
+    plugins: () => [flacWasm()],
+  },
   server: {
     port: 5173,
     headers: {

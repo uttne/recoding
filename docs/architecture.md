@@ -12,6 +12,7 @@
                  └ AudioWorklet「capture」（512 サンプルごとに転送）
                       └ Gain 0 → destination
                  └ PitchEngine.onChunk
+                      ├ 録音中だけ、チャンクのコピーを録音バッファへ
                       ├ RingBuffer（直近 8192 サンプル）→ ACF2+ または MPM
                       ├ 選択中だけ → PyinStream（pYIN）
                       ├ StreamResampler → 16 kHz → SwiftF0Stream → Worker
@@ -20,18 +21,35 @@
                            └ 選択中の検出器の点だけ onPoint
                                 └ main.ts の points[]
                                      ├ requestAnimationFrame で PitchGraph.draw
-                                     └ 同じ点と、チャンクごとの RMS → LoudnessGraph.draw
+                                     ├ 同じ点と、チャンクごとの RMS → LoudnessGraph.draw
+                                     └ 同じ点と RMS → RibbonGraph.draw
+
+録音を停止
+  └ 録音バッファを 16 bit PCM の WAV にする
+       └ IndexedDB
+            ├ files … 名前、時刻、サンプルレート、フレーム数
+            └ blobs … WAV のバイト列
+
+保存した録音の再生
+  └ blobs の WAV を Float32 に戻す
+       └ AudioBufferSource → destination（聞こえる）
+            └ 同じ AudioWorklet「capture」→ Gain 0 → destination
+                 └ PitchEngine.onChunk（上と同じ検出）
 ```
 
-Worklet から `destination` まで繋がないと、ブラウザがこのグラフを処理しないことがあります。音をスピーカーへ戻さないため、間の Gain は 0 です。
+Worklet から `destination` まで繋がないと、ブラウザがこのグラフを処理しないことがあります。マイクのときは音をスピーカーへ戻さないため、間の Gain は 0 です。保存した録音を再生するときは、同じ Worklet に加えて `destination` へ直接繋ぎ、音が聞こえます。
 
-マイク制約は、`autoGainControl` を端末がサポートするとき `echoCancellation: false`、`noiseSuppression: true`、`autoGainControl: true` です。サポートしないときは `{ audio: true }` です。
+「録音を停止」を押すと、`onChunk` が溜めたコピーを 16 bit に量子化し、WAV として IndexedDB へ書きます。マイクを聞いているだけではバッファは空です。`idb` で開くデータベース名は `pitch-recorder` です。`files` が目録、`blobs` がファイル本体です。再生は WAV を Float32 に戻して `AudioBufferSource` で鳴らし、解析用のサンプルクロックは 0 からやり直しです。前のセッションの推論が遅れて返っても、セッションを始めるときに進めた印と違うものは捨てます。マイクを止めた直後の SwiftF0 の `flush` は、次のセッションが始まる前ならそのまま点になります。
+
+ダウンロードの WAV は、保存してあるバイト列をそのまま返します。FLAC は libflacjs の wasm ビルドです。`vite.config.ts` がその wasm の URL をエンコーダへ渡すので、Worker は隣のファイル名を探しません。MP3 は @breezystack/lamejs です。どちらも `encode.worker.ts` が符号化します。Worker を起動できないときだけ、同じ符号化をメインスレッドでやり直します。MP3 は 192 kbps です。LAME が受け取れないサンプルレートのときだけ、符号化の前に 48 kHz へ変換します。
+
+マイク制約は、ブラウザが対応しているエコーキャンセル、ノイズ抑制、自動ゲインをすべてオフにします。オフにできないときは、その制約なしで開き直します。表示する dB は、こうして届いた波形の RMS を `20 log10` した値で、サンプルが振り切れる大きさが 0 dBFS です。OS のマイク効果がブラウザの手前でかかっている場合、この制約では外れません。
 
 `AudioContext` はサンプルレートを指定せずに作ります。ACF2+、MPM、pYIN はそのレートのまま計算します。SwiftF0 と Tiny-CREPE へ渡す前に `StreamResampler` が 16 kHz へ下げ、Basic Pitch は 22050 Hz へ下げます。すでに目的のレートのときはコピーするだけです。
 
 ## 時刻
 
-点の `time` は、マイク開始からの秒です。サンプル数を `AudioContext.sampleRate` で割った値で、`performance.now()` ではありません。
+点の `time` は、マイク開始からの秒です。サンプル数を `AudioContext.sampleRate` で割った値で、`performance.now()` ではありません。マイクを止めて再開しても、この秒は続き、画面の点も残ります。保存した録音の再生だけは 0 秒から始め、始めるときに画面の点を消します。
 
 SwiftF0 のフレーム時刻は 16 kHz ストリームの先頭が 0 秒です。モデルの準備が遅れてストリームを後から作った場合、`PitchEngine` が `swiftOrigin` を足し、マイク開始からの秒に揃えます。SwiftF0 の点は公式実装どおり 176 ms 遅れて確定するので、同じ瞬間の ACF2+ より左に出ます。推論は `src/audio/swiftf0.worker.ts` の `InferenceSession` が行います。メインスレッドは音声バッファのコピーを渡し、`pitch` と `confidence` を受け取ります。点の時刻は動かしません。
 
@@ -74,6 +92,8 @@ SwiftF0、pYIN、Tiny-CREPE、Basic Pitch、ACF2+→Basic を選択してマイ�
 
 その下に、横軸をピッチ、縦軸を大きさにしたグラフがあります。ピッチの範囲は時間のグラフと同じです。縦軸は -60 dBFS から 0 dBFS で、点の時刻に最も近いチャンクの RMS を `20 log10` で換算します。50 ms より離れたチャンクしか無い点と、-60 dBFS 未満は出しません。直近 8 秒の有音を点で示し、新しい点ほど濃くします。いちばん新しい時刻が 0.35 秒以内のときは、その点を大きく描きます。Basic Pitch の重音は、各音をその瞬間の入力の大きさで同じ高さに置きます。選択中の検出器の下限と上限は縦の破線で、外側は暗くなります。`main.ts` は直近約 9 秒の RMS を `points` とは別に保持します。
 
+その下に、時間とピッチのグラフと同じ軸で、音量を線のまわりのにじみとして重ねたグラフがあります。芯は幅 2px で、色は検出器の色です。音量は声部ごとに約 58 ms の中央値でならし、声部の内側では隣の点まで直線で補間します。−48 dB 以下は芯だけ、−12 dB 以上は芯の外側 12px で、その間は dB に比例して太さが連続して変わります。芯の色は同じ音量で白へ最大 25% 混ぜます。にじみ自体は検出器の色のまま、外側ほど薄くします。直近 0.3 秒は不透明で、それより前の不透明度は 0.9 です。線を切る条件は時間のグラフと同じです。Basic Pitch の重音は声部ごとににじみますが、入力が 1 本なので同じ時刻の音量は同じです。下限と上限の破線、未確定の帯も時間のグラフと同じです。
+
 ## ONNX Runtime の置き場所
 
 SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxruntime-web` 1.21.0 の wasm ビルドを使います。実行時に次の 2 ファイルを `/ort/` から取ります。
@@ -104,9 +124,11 @@ SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxrunt
 
 | やりたいこと | 触るファイル |
 |---|---|
-| ボタンや CSV の列 | `src/main.ts`、必要なら `index.html` |
+| ボタンや CSV の列、録音の再生とダウンロード | `src/main.ts`、必要なら `index.html` |
+| IndexedDB の録音ファイル | `src/recordings.ts` |
+| WAV、FLAC、MP3 | `src/audio/wav.ts`、`src/audio/encode.ts`、`src/audio/encode.worker.ts` |
 | 線の色、見える音域、何秒分描くか | `src/graph.ts` |
-| マイクの制約、16 ms の間隔 | `src/audio/engine.ts` |
+| マイクの制約、16 ms の間隔、再生 | `src/audio/engine.ts` |
 | ACF2+ の式やしきい値 | `src/audio/acf2.ts` と `src/audio/acf2.test.ts` |
 | ACF2+→Basic の置き換え | `src/audio/acf-basic.ts` と `src/audio/acf-basic.test.ts` |
 | SwiftF0 の先読みや無音ゲート | `src/audio/swiftf0.ts` と `src/audio/swiftf0.test.ts` |

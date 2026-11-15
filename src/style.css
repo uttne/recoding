@@ -109,6 +109,12 @@ button:disabled { opacity: 0.45; cursor: default; }
   border-color: transparent;
 }
 
+#record[data-live="true"] {
+  background: #e05a4f;
+  color: #2a100e;
+  border-color: transparent;
+}
+
 fieldset {
   display: flex;
   flex-wrap: wrap;
@@ -197,6 +203,75 @@ fieldset.limits legend {
   background: linear-gradient(90deg, var(--swift), var(--acf));
 }
 
+.library { margin-top: 18px; }
+
+.library h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.library-head,
+.library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.library-head { justify-content: space-between; }
+
+.library .graph-note { margin-top: 10px; }
+
+select {
+  font: inherit;
+  color: var(--ink);
+  background: #2a241e;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.recordings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.recordings button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.recordings button[aria-pressed="true"] { background: #3a322a; }
+
+.recordings button[data-playing="true"] { box-shadow: inset 0 -2px var(--acf); }
+
+.recording-length {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.recordings .empty {
+  color: var(--muted);
+  padding: 4px 2px;
+}
+
+#play[data-live="true"] {
+  background: var(--swift);
+  color: #10211f;
+  border-color: transparent;
+}
+
 .status { min-height: 1.4em; color: var(--muted); }
 
 canvas {
@@ -208,6 +283,7 @@ canvas {
 
 #graph { height: min(52vh, 640px); }
 #loudness { height: min(26vh, 280px); }
+#ribbon { height: min(52vh, 640px); }
 
 .graph-note {
   margin: 14px 2px 8px;

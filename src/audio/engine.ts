@@ -11,11 +11,50 @@ import { CREPE_FMAX_HZ, CrepeStream, type CrepeFrame } from "./crepe";
 import { inferCrepe, loadCrepeSession } from "./crepe-session";
 import { createMpm, MPM_FMAX_HZ, mpmWindowSize } from "./mpm";
 import { PYIN_FMAX_HZ, PyinStream, type PyinFrame } from "./pyin";
+import { joinFloat32 } from "./pcm";
 import { StreamResampler } from "./resample";
 import { inferSwift, loadSwiftSession } from "./swiftf0-session";
 import { SWIFT_FMAX, SWIFT_SAMPLE_RATE, SwiftF0Stream, type SwiftFrame } from "./swiftf0";
 
 export type DetectorId = "acf2" | "acf-basic" | "swiftf0" | "mpm" | "pyin" | "crepe" | "basic-mono" | "basic-poly";
+
+/**
+ * Ask the browser not to change the captured level. Each flag is set only when
+ * the browser lists it, because an unknown constraint can reject the microphone.
+ * `true` means no override, so the browser keeps its default.
+ */
+export function rawMicConstraints(supported: MediaTrackSupportedConstraints): MediaTrackConstraints | true {
+  const audio: MediaTrackConstraints = {};
+  if (supported.echoCancellation) audio.echoCancellation = false;
+  if (supported.noiseSuppression) audio.noiseSuppression = false;
+  if (supported.autoGainControl) audio.autoGainControl = false;
+  return Object.keys(audio).length > 0 ? audio : true;
+}
+
+function isOverconstrained(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "OverconstrainedError";
+}
+
+/** Prefer an unprocessed mic. If the device cannot disable processing, open it with the browser default. */
+async function openRawMic(audio: MediaTrackConstraints | true): Promise<MediaStream> {
+  try {
+    const media = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    if (audio !== true) {
+      const track = media.getAudioTracks()[0];
+      if (track) {
+        try {
+          await track.applyConstraints(audio);
+        } catch {
+          // The stream stays open. The device kept its own processing.
+        }
+      }
+    }
+    return media;
+  } catch (error) {
+    if (audio === true || !isOverconstrained(error)) throw error;
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  }
+}
 
 export type PitchEvent = {
   hz: number;
@@ -102,7 +141,17 @@ export class PitchEngine {
   private basicReady = false;
   private basicLoading = false;
   private basicError: string | null = null;
+  private source: "idle" | "mic" | "file" = "idle";
+  private captureChunks: Float32Array[] | null = null;
+  private playback: AudioBufferSourceNode | null = null;
+  private playbackEnded = false;
+  /** Bumped when a mic or file session starts, so a late result from the previous one is ignored. */
+  private analysisToken = 0;
   running = false;
+
+  get mode(): "idle" | "mic" | "file" {
+    return this.source;
+  }
 
   constructor(private readonly handlers: Handlers) {}
 
@@ -127,15 +176,11 @@ export class PitchEngine {
 
   async start(): Promise<void> {
     if (this.running) return;
-    const supported = navigator.mediaDevices.getSupportedConstraints();
-    const audio = supported.autoGainControl
-      ? { echoCancellation: false, noiseSuppression: true, autoGainControl: true }
-      : true;
-    const mediaPromise = navigator.mediaDevices.getUserMedia({ audio, video: false });
+    const audio = rawMicConstraints(navigator.mediaDevices.getSupportedConstraints());
     const AudioCtx = window.AudioContext;
     this.context = new AudioCtx();
     try {
-      this.media = await mediaPromise;
+      this.media = await openRawMic(audio);
       if (this.context.state === "suspended") await this.context.resume();
       await this.context.audioWorklet.addModule(`${import.meta.env.BASE_URL}capture-worklet.js`);
     } catch (error) {
@@ -147,16 +192,16 @@ export class PitchEngine {
     }
     const source = this.context.createMediaStreamSource(this.media);
     this.worklet = new AudioWorkletNode(this.context, "capture");
-    this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer | Float32Array>) => {
-      const chunk = event.data instanceof Float32Array ? event.data : new Float32Array(event.data);
-      this.onChunk(chunk);
-    };
+    this.bindWorklet();
     const mute = this.context.createGain();
     mute.gain.value = 0;
     source.connect(this.worklet);
     this.worklet.connect(mute);
     mute.connect(this.context.destination);
+    this.analysisToken += 1;
     this.running = true;
+    this.source = "mic";
+    this.captureChunks = null;
     this.lastAcfTime = -1;
     this.lastMpmTime = -1;
     this.ring = new RingBuffer(8192);
@@ -166,8 +211,96 @@ export class PitchEngine {
     this.preloadModel();
   }
 
-  stop(): void {
+  get recording(): boolean {
+    return this.captureChunks !== null;
+  }
+
+  /** Start a take. The microphone must already be open. A second call keeps the current take. */
+  startRecording(): void {
+    if (this.source !== "mic") throw new Error("マイクを開始してから録音します");
+    if (this.captureChunks) return;
+    this.captureChunks = [];
+    this.handlers.onStatus(this.runningStatus());
+  }
+
+  /** Copy of the mic audio since startRecording. Clears the buffer and leaves the microphone open. */
+  takeRecording(): { samples: Float32Array; sampleRate: number } | null {
+    const chunks = this.captureChunks;
+    const sampleRate = this.context?.sampleRate ?? 0;
+    this.captureChunks = null;
+    if (!chunks || chunks.length === 0 || sampleRate <= 0) return null;
+    return { samples: joinFloat32(chunks), sampleRate };
+  }
+
+  /**
+   * Play stored samples out loud and analyse them with the same path as the microphone.
+   * The sample clock restarts at zero. Callers should clear the drawn points first.
+   */
+  async play(samples: Float32Array, sampleRate: number): Promise<void> {
+    if (this.source === "mic") throw new Error("マイクを停止してから再生します");
+    if (samples.length === 0 || sampleRate <= 0) throw new Error("再生する音がありません");
+    if (this.running) this.stop(true);
+    this.analysisToken += 1;
+    const AudioCtx = window.AudioContext;
+    try {
+      this.context = new AudioCtx({ sampleRate });
+    } catch {
+      this.context = new AudioCtx();
+    }
+    try {
+      if (this.context.state === "suspended") await this.context.resume();
+      await this.context.audioWorklet.addModule(`${import.meta.env.BASE_URL}capture-worklet.js`);
+      const buffer = this.context.createBuffer(1, samples.length, sampleRate);
+      buffer.getChannelData(0).set(samples);
+      const source = this.context.createBufferSource();
+      source.buffer = buffer;
+      this.worklet = new AudioWorkletNode(this.context, "capture");
+      this.bindWorklet();
+      const mute = this.context.createGain();
+      mute.gain.value = 0;
+      source.connect(this.context.destination);
+      source.connect(this.worklet);
+      this.worklet.connect(mute);
+      mute.connect(this.context.destination);
+      this.samples = 0;
+      this.lastAcfTime = -1;
+      this.lastMpmTime = -1;
+      this.ring = new RingBuffer(8192);
+      this.mpm = null;
+      this.captureChunks = null;
+      this.running = true;
+      this.source = "file";
+      this.playback = source;
+      this.openStreams();
+      source.onended = () => {
+        if (this.playback !== source) return;
+        this.playbackEnded = true;
+        this.stop();
+      };
+      source.start();
+      this.handlers.onStatus(this.runningStatus());
+      this.preloadModel();
+    } catch (error) {
+      this.stop(true);
+      throw error;
+    }
+  }
+
+  stop(silent = false): void {
+    const finishedFile = this.source === "file" && this.playbackEnded;
+    this.playbackEnded = false;
     this.running = false;
+    this.source = "idle";
+    this.captureChunks = null;
+    const playback = this.playback;
+    this.playback = null;
+    if (playback) {
+      try {
+        playback.stop();
+      } catch {
+        // The buffer already reached its end.
+      }
+    }
     this.worklet?.disconnect();
     this.worklet = null;
     this.media?.getTracks().forEach((track) => track.stop());
@@ -184,7 +317,15 @@ export class PitchEngine {
     this.basic = null;
     this.mpm = null;
     this.handlers.onLevel(0);
-    this.handlers.onStatus("停止しました");
+    if (!silent) this.handlers.onStatus(finishedFile ? "再生が終わりました" : "停止しました");
+  }
+
+  private bindWorklet(): void {
+    if (!this.worklet) return;
+    this.worklet.port.onmessage = (event: MessageEvent<ArrayBuffer | Float32Array>) => {
+      const chunk = event.data instanceof Float32Array ? event.data : new Float32Array(event.data);
+      this.onChunk(chunk);
+    };
   }
 
   private get isBasic(): boolean {
@@ -199,12 +340,19 @@ export class PitchEngine {
     return this.detectorId === "basic-poly" ? "poly" : "mono";
   }
 
+  private activeStatus(): string {
+    if (this.source === "file") return "再生中";
+    if (this.captureChunks) return "録音中";
+    return "マイクを聞いています";
+  }
+
   private runningStatus(): string {
-    if (this.detectorId === "swiftf0" && !this.swiftReady) return "録音中。SwiftF0 はモデルの読み込み後に使えます";
-    if (this.detectorId === "crepe" && !this.crepeReady) return "録音中。Tiny-CREPE はモデルの読み込み後に使えます";
-    if (this.detectorId === "acf-basic" && !this.basicReady) return "録音中。右端は ACF2+ です。過去の置き換えはモデルの読み込み後です";
-    if (this.isBasic && !this.basicReady) return "録音中。Basic Pitch はモデルの読み込み後に使えます";
-    return "録音中";
+    const lead = this.activeStatus();
+    if (this.detectorId === "swiftf0" && !this.swiftReady) return `${lead}。SwiftF0 はモデルの読み込み後に使えます`;
+    if (this.detectorId === "crepe" && !this.crepeReady) return `${lead}。Tiny-CREPE はモデルの読み込み後に使えます`;
+    if (this.detectorId === "acf-basic" && !this.basicReady) return `${lead}。右端は ACF2+ です。過去の置き換えはモデルの読み込み後です`;
+    if (this.isBasic && !this.basicReady) return `${lead}。Basic Pitch はモデルの読み込み後に使えます`;
+    return lead;
   }
 
   private announce(model: "swiftf0" | "crepe" | "basic"): boolean {
@@ -220,7 +368,7 @@ export class PitchEngine {
     try {
       await loadSwiftSession();
       this.swiftReady = true;
-      if (this.announce("swiftf0")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      if (this.announce("swiftf0")) this.handlers.onStatus(this.running ? this.activeStatus() : "準備できました");
       this.attachSwift();
     } catch (error) {
       this.swiftError = error instanceof Error ? error.message : String(error);
@@ -235,7 +383,7 @@ export class PitchEngine {
     try {
       await loadCrepeSession();
       this.crepeReady = true;
-      if (this.announce("crepe")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      if (this.announce("crepe")) this.handlers.onStatus(this.running ? this.activeStatus() : "準備できました");
       this.sync();
     } catch (error) {
       this.crepeError = error instanceof Error ? error.message : String(error);
@@ -250,7 +398,7 @@ export class PitchEngine {
     try {
       await loadBasicSession();
       this.basicReady = true;
-      if (this.announce("basic")) this.handlers.onStatus(this.running ? "録音中" : "準備できました");
+      if (this.announce("basic")) this.handlers.onStatus(this.running ? this.activeStatus() : "準備できました");
       this.sync();
     } catch (error) {
       this.basicError = error instanceof Error ? error.message : String(error);
@@ -260,18 +408,25 @@ export class PitchEngine {
 
   private openStreams(): void {
     if (!this.context) return;
+    const token = this.analysisToken;
     const rate = this.context.sampleRate;
     this.crepe = new CrepeStream(
       rate,
       inferCrepe,
-      (frames) => this.onCrepe(frames),
+      (frames) => {
+        if (token !== this.analysisToken) return;
+        this.onCrepe(frames);
+      },
       (error) => this.fail("Tiny-CREPE", error),
       () => this.crepeFmax,
     );
     this.basic = new BasicPitchStream(
       rate,
       inferBasic,
-      (frames) => this.onBasic(frames),
+      (frames) => {
+        if (token !== this.analysisToken) return;
+        this.onBasic(frames);
+      },
       (error) => this.fail("Basic Pitch", error),
       () => this.basicMode(),
       () => this.basicFmax,
@@ -289,17 +444,25 @@ export class PitchEngine {
 
   private ensurePyin(): void {
     if (!this.running || !this.context || this.pyin) return;
+    const token = this.analysisToken;
     this.pyinOrigin = this.time;
-    this.pyin = new PyinStream(this.context.sampleRate, () => this.pyinFmax, (frames) => this.onPyin(frames));
+    this.pyin = new PyinStream(this.context.sampleRate, () => this.pyinFmax, (frames) => {
+      if (token !== this.analysisToken) return;
+      this.onPyin(frames);
+    });
   }
 
   private attachSwift(): void {
     if (!this.running || !this.swiftReady || !this.context || this.swift) return;
+    const token = this.analysisToken;
     this.resampler = new StreamResampler(this.context.sampleRate, SWIFT_SAMPLE_RATE);
     this.swiftOrigin = this.samples / this.context.sampleRate;
     this.swift = new SwiftF0Stream(
       (audio) => inferSwift(audio, this.swiftFmax),
-      (frames) => this.onSwiftFrames(frames),
+      (frames) => {
+        if (token !== this.analysisToken) return;
+        this.onSwiftFrames(frames);
+      },
       (error) => this.fail("SwiftF0", error),
     );
   }
@@ -311,6 +474,7 @@ export class PitchEngine {
 
   private onChunk(chunk: Float32Array): void {
     if (!this.context) return;
+    if (this.captureChunks) this.captureChunks.push(new Float32Array(chunk));
     this.ring.push(chunk);
     this.samples += chunk.length;
     const sampleRate = this.context.sampleRate;
