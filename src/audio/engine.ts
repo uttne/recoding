@@ -350,7 +350,7 @@ export class PitchEngine {
     const lead = this.activeStatus();
     if (this.detectorId === "swiftf0" && !this.swiftReady) return `${lead}。SwiftF0 はモデルの読み込み後に使えます`;
     if (this.detectorId === "crepe" && !this.crepeReady) return `${lead}。Tiny-CREPE はモデルの読み込み後に使えます`;
-    if (this.detectorId === "acf-basic" && !this.basicReady) return `${lead}。右端は ACF2+ です。過去の置き換えはモデルの読み込み後です`;
+    if (this.detectorId === "acf-basic" && !this.basicReady) return `${lead}。モデルの読み込み後に音程が安定します`;
     if (this.isBasic && !this.basicReady) return `${lead}。Basic Pitch はモデルの読み込み後に使えます`;
     return lead;
   }

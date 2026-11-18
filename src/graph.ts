@@ -17,12 +17,16 @@ const COLOR: Record<DetectorId, string> = {
   "basic-poly": "#e07a6a",
 };
 
+/** One pitch color for the performance view. Detector hues stay behind the debug switch. */
+export const UNIFIED_PITCH_COLOR = "#f2b48a";
+
 function traceColor(detector: DetectorId, provisional: boolean): string {
   if (detector === "acf-basic") return provisional ? COLOR.acf2 : COLOR["basic-mono"];
   return COLOR[detector];
 }
 
-export function pointColor(detector: DetectorId, provisional: boolean): string {
+export function pointColor(detector: DetectorId, provisional: boolean, distinguish = true): string {
+  if (!distinguish) return UNIFIED_PITCH_COLOR;
   return traceColor(detector, provisional);
 }
 
@@ -69,9 +73,20 @@ export type GraphRanges = {
   byDetector: Record<DetectorId, FrequencyRange>;
 };
 
+export type GraphStyle = {
+  /** Paint each detector, and ACF2+ versus Basic, in its own color. */
+  distinguish: boolean;
+  /** Dim outside the active range and draw the limit lines. */
+  guides: boolean;
+  /** Wash the time that a lagging detector has not confirmed. */
+  pending: boolean;
+};
+
 export type GraphFrame = {
   pendingFrom?: number | null;
   ranges?: GraphRanges;
+  /** Omitted style keeps the debug drawing used by the original graphs. */
+  style?: GraphStyle;
 };
 
 /** A pitch the time-pitch line keeps. Several voices can share one timestamp. */
@@ -92,11 +107,23 @@ export type PitchVoice = {
 
 const VOICE_GAP_SECONDS = 0.05;
 
+export type VoiceOptions = {
+  /** Start a new stroke where ACF2+ hands over to Basic. Default keeps that split. */
+  splitProvisional?: boolean;
+};
+
 /**
  * Voices for the time-pitch line. Breaks on silence, a gap over 50 ms,
  * a detector change, or a jump past the semitone limit.
+ * With `splitProvisional: false`, an ACF2+→Basic handoff stays one stroke and uses the wider join.
  */
-export function pitchVoices(points: readonly PitchPoint[], now: number, a4: number): PitchVoice[] {
+export function pitchVoices(
+  points: readonly PitchPoint[],
+  now: number,
+  a4: number,
+  options: VoiceOptions = {},
+): PitchVoice[] {
+  const split = options.splitProvisional !== false;
   const visible = points
     .filter((point) => now - point.time <= WINDOW_SECONDS && point.time <= now)
     .sort((a, b) => a.time - b.time);
@@ -118,7 +145,11 @@ export function pitchVoices(points: readonly PitchPoint[], now: number, a4: numb
       let bestDist = Number.POSITIVE_INFINITY;
       for (let i = 0; i < open.length; i++) {
         if (used.has(i) || open[i].detector !== point.detector || point.time - open[i].time > VOICE_GAP_SECONDS) continue;
-        const limit = joinLimit(point.detector, open[i].provisional, provisional);
+        const limit = joinLimit(
+          point.detector,
+          split ? open[i].provisional : false,
+          split ? provisional : false,
+        );
         const dist = Math.abs(midi - open[i].midi);
         if (dist <= limit && dist <= bestDist) {
           best = i;
@@ -131,8 +162,8 @@ export function pitchVoices(points: readonly PitchPoint[], now: number, a4: numb
         const prev = open[best];
         const previous = prev.voice.points[prev.voice.points.length - 1];
         prev.voice.points.push(vertex);
-        if (prev.provisional === provisional) {
-          next.push({ time: point.time, midi, detector: point.detector, provisional, voice: prev.voice });
+        if (!split || prev.provisional === provisional) {
+          next.push({ time: point.time, midi, detector: point.detector, provisional: prev.provisional, voice: prev.voice });
         } else {
           const voice: PitchVoice = { detector: point.detector, provisional, points: [{ ...previous }, vertex] };
           voices.push(voice);
@@ -182,8 +213,10 @@ export function paintPitchTimeAxes(
   a4: number,
   frame: GraphFrame = {},
 ): PitchTimeLayout {
-  const pendingFrom = frame.pendingFrom ?? null;
+  const pendingFrom = frame.style?.pending === false ? null : (frame.pendingFrom ?? null);
   const ranges = frame.ranges;
+  const showGuides = frame.style?.guides !== false;
+  const distinguish = frame.style?.distinguish !== false;
   const midiHigh = viewMidiHigh(ranges, a4);
   const ratio = pitchPixelRatio();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -228,13 +261,13 @@ export function paintPitchTimeAxes(
     if (x1 > x0) {
       ctx.save();
       ctx.globalAlpha = 0.12;
-      ctx.fillStyle = ranges.active === "acf-basic" ? COLOR.acf2 : COLOR[ranges.active];
+      ctx.fillStyle = distinguish ? (ranges.active === "acf-basic" ? COLOR.acf2 : COLOR[ranges.active]) : UNIFIED_PITCH_COLOR;
       ctx.fillRect(x0, plotTop, x1 - x0, plotHeight);
       ctx.restore();
     }
   }
 
-  if (ranges) {
+  if (ranges && showGuides) {
     const active = ranges.byDetector[ranges.active];
     const yMax = yOpen(hzToMidi(active.fmax, a4));
     const yMin = yOpen(hzToMidi(active.fmin, a4));
@@ -248,8 +281,8 @@ export function paintPitchTimeAxes(
       const edge = Math.max(yMin, plotTop);
       ctx.fillRect(plotLeft, edge, plotWidth, bottom - edge);
     }
-    drawLimit(ctx, active.fmin, ranges.active, "下限", "left", plotLeft, plotTop, plotWidth, plotHeight, ratio, a4, yOpen);
-    drawLimit(ctx, active.fmax, ranges.active, "上限", "right", plotLeft, plotTop, plotWidth, plotHeight, ratio, a4, yOpen);
+    drawLimit(ctx, active.fmin, ranges.active, "下限", "left", plotLeft, plotTop, plotWidth, plotHeight, ratio, a4, yOpen, distinguish);
+    drawLimit(ctx, active.fmax, ranges.active, "上限", "right", plotLeft, plotTop, plotWidth, plotHeight, ratio, a4, yOpen, distinguish);
   }
 
   return { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiHigh };
@@ -268,11 +301,13 @@ function drawLimit(
   ratio: number,
   a4: number,
   yOpen: (midi: number) => number,
+  distinguish: boolean,
 ): void {
   const y = yOpen(hzToMidi(hz, a4));
   if (y < top || y > top + height) return;
+  const color = distinguish ? COLOR[detector] : UNIFIED_PITCH_COLOR;
   ctx.save();
-  ctx.strokeStyle = COLOR[detector];
+  ctx.strokeStyle = color;
   ctx.lineWidth = 1.5 * ratio;
   ctx.setLineDash([7 * ratio, 5 * ratio]);
   ctx.beginPath();
@@ -280,11 +315,12 @@ function drawLimit(
   ctx.lineTo(left + width, y);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = COLOR[detector];
+  ctx.fillStyle = color;
   ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
   ctx.textAlign = align;
   ctx.textBaseline = y + 16 * ratio > top + height ? "bottom" : "top";
-  const label = `${detectorLimitLabel(detector)} ${edge} ${noteName(hzToMidi(hz, a4))}`;
+  const note = noteName(hzToMidi(hz, a4));
+  const label = distinguish ? `${detectorLimitLabel(detector)} ${edge} ${note}` : `${edge} ${note}`;
   const x = align === "left" ? left + 10 * ratio : left + width - 10 * ratio;
   const textY = ctx.textBaseline === "top" ? y + 5 * ratio : y - 5 * ratio;
   ctx.fillText(label, x, textY);
@@ -320,9 +356,10 @@ export class PitchGraph {
     ctx.lineWidth = 2.4 * ratio;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    for (const voice of pitchVoices(points, now, this.a4)) {
+    const distinguish = frame.style?.distinguish !== false;
+    for (const voice of pitchVoices(points, now, this.a4, { splitProvisional: distinguish })) {
       ctx.beginPath();
-      ctx.strokeStyle = traceColor(voice.detector, voice.provisional);
+      ctx.strokeStyle = pointColor(voice.detector, voice.provisional, distinguish);
       const first = voice.points[0];
       ctx.moveTo(pitchTimeX(first.time, now, plotLeft, plotWidth), pitchY(first.midi, midiHigh, plotTop, plotHeight, true));
       for (let i = 1; i < voice.points.length; i++) {

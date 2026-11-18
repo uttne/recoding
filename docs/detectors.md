@@ -169,9 +169,9 @@ Spotify の Basic Pitch（ICASSP 2022）の `nmp.onnx` です。Apache-2.0 で�
 
 ## ACF2+→Basic
 
-ラジオの値は `acf-basic` です。右端は ACF2+、Basic Pitch の単音が返した時刻より前は Basic Pitch です。大きな音名は ACF2+ の点だけを更新します。遅れて届いたフレームでは音名を変えません。
+初期値は `acf-basic` です。右端は ACF2+、Basic Pitch の単音が返した時刻より前は Basic Pitch です。大きな音名は ACF2+ の点だけを更新します。遅れて届いたフレームでは音名を変えません。画面の初期描画はこれを 1 色・1 本の線にします。ここから先の色と、暫定と確定で線を分ける挙動は、設定の「検出の色分け」を入れたときです。
 
-ACF2+ は、ACF2+ を単体で選んだときと同じ 16 ms 間隔です。上限も ACF2+ の入力を使います。点には `provisional: true` が付き、線の色は ACF2+ の `#e6a15c` です。
+ACF2+ は、ACF2+ を単体で選んだときと同じ 16 ms 間隔です。上限も ACF2+ の入力を使います。点には `provisional: true` が付きます。色分けを入れると線の色は ACF2+ の `#e6a15c` です。
 
 Basic Pitch は単音の読み方だけを使います。モデルの読み込み、22050 Hz の窓、両端 15 フレームの切り捨ては Basic Pitch 単音と同じです。フレームが届くと `reviseHybrid`（`src/audio/acf-basic.ts`）が、そのフレームから半フレーム（`256 / 22050 / 2` 秒、約 5.8 ms）以内の暫定点を次の規則で置き換えます。
 
@@ -192,6 +192,6 @@ Basic Pitch は単音の読み方だけを使います。モデルの読み込�
 1. `DetectorId` に識別子を足す。`src/audio/engine.ts` にあります。
 2. `onChunk` から新しい推定を呼び、選択中のときだけ `onPoint` する。無音は `hz: null` にします。
 3. `src/graph.ts` の `COLOR` と `LIMIT_LABEL` に色と名前を足す。`GraphRanges.byDetector` にも範囲を足す。
-4. `index.html` の検出ラジオと上限の入力に choice を足す。`src/main.ts` は `input[name="detector"]` の value をそのまま `engine.detector` に入れます。
+4. `src/session.ts` の `DETECTORS` と、上限があるなら `CEILING_FIELDS` に choice を足す。値はそのまま `engine.detector` に入ります。
 5. モデルや WASM が増える場合は、`public` へ `.mjs` を置かず、`vite.config.ts` の配信方法に合わせます。詳細は [architecture.md](architecture.md) の「ONNX Runtime の置き場所」です。
 6. 式に数値の期待があるものは `src/audio/*.test.ts` に足し、`mise exec -- npm test` で通します。マイクを使ったテストはまだありません。

@@ -4,6 +4,7 @@ import {
   MIDI_HIGH,
   MIDI_LOW,
   WINDOW_SECONDS,
+  UNIFIED_PITCH_COLOR,
   detectorColor,
   detectorLimitLabel,
   pointColor,
@@ -26,6 +27,7 @@ export class LoudnessGraph {
   private readonly ctx: CanvasRenderingContext2D;
   private a4 = 440;
   private midiHigh = MIDI_HIGH;
+  private distinguish = true;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -47,6 +49,8 @@ export class LoudnessGraph {
 
   draw(points: PitchPoint[], levels: readonly LevelSample[], now: number, frame: GraphFrame = {}): void {
     const ranges = frame.ranges;
+    const guides = frame.style?.guides !== false;
+    this.distinguish = frame.style?.distinguish !== false;
     this.midiHigh = viewMidiHigh(ranges, this.a4);
     const { ctx, canvas } = this;
     const width = canvas.width;
@@ -69,7 +73,7 @@ export class LoudnessGraph {
     this.drawPitchGrid(plotLeft, plotTop, plotWidth, plotHeight, ratio);
     this.drawDbGrid(plotLeft, plotTop, plotWidth, plotHeight, ratio);
 
-    if (ranges) {
+    if (ranges && guides) {
       const active = ranges.byDetector[ranges.active];
       this.shadeOutside(active, plotLeft, plotTop, plotWidth, plotHeight);
       this.drawLimit(active.fmin, ranges.active, "下限", "left", plotLeft, plotTop, plotWidth, plotHeight, ratio);
@@ -170,7 +174,8 @@ export class LoudnessGraph {
     if (x < left || x > left + width) return;
     const { ctx } = this;
     ctx.save();
-    ctx.strokeStyle = detectorColor(detector);
+    const color = this.distinguish ? detectorColor(detector) : UNIFIED_PITCH_COLOR;
+    ctx.strokeStyle = color;
     ctx.lineWidth = 1.5 * ratio;
     ctx.setLineDash([7 * ratio, 5 * ratio]);
     ctx.beginPath();
@@ -178,11 +183,12 @@ export class LoudnessGraph {
     ctx.lineTo(x, top + height);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = detectorColor(detector);
+    ctx.fillStyle = color;
     ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
     ctx.textAlign = align === "left" ? "left" : "right";
     ctx.textBaseline = "top";
-    const label = `${detectorLimitLabel(detector)} ${edge} ${noteName(hzToMidi(hz, this.a4))}`;
+    const note = noteName(hzToMidi(hz, this.a4));
+    const label = this.distinguish ? `${detectorLimitLabel(detector)} ${edge} ${note}` : `${edge} ${note}`;
     const textX = align === "left" ? x + 8 * ratio : x - 8 * ratio;
     ctx.fillText(label, textX, top + 6 * ratio);
     ctx.restore();
@@ -206,7 +212,7 @@ export class LoudnessGraph {
     ctx.save();
     ctx.globalAlpha = style.alpha;
     ctx.beginPath();
-    ctx.fillStyle = pointColor(detector, provisional);
+    ctx.fillStyle = pointColor(detector, provisional, this.distinguish);
     ctx.arc(x, y, style.radius * ratio, 0, Math.PI * 2);
     ctx.fill();
     if (style.ring) {

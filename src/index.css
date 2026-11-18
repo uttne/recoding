@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #14110e;
+  --color-panel: #211c17;
+  --color-ink: #f3ead7;
+  --color-muted: #b3a89a;
+  --color-line: rgba(243, 234, 215, 0.16);
+  --color-accent: #e6a15c;
+  --color-record: #e05a4f;
+  --color-play: #7ed0cb;
+  --font-sans: "Segoe UI", "Yu Gothic UI", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 420px at 0% -10%, rgba(230, 161, 92, 0.16), transparent 55%),
+    radial-gradient(700px 360px at 100% 0%, rgba(126, 208, 203, 0.1), transparent 50%),
+    var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}

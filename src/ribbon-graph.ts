@@ -47,14 +47,15 @@ export class RibbonGraph {
   }
 
   draw(points: PitchPoint[], levels: readonly LevelSample[], now: number, frame: GraphFrame = {}): void {
+    const distinguish = frame.style?.distinguish !== false;
     const layout = paintPitchTimeAxes(this.ctx, this.canvas.width, this.canvas.height, now, this.a4, frame);
     const { ctx } = this;
-    const runs = ribbonRuns(points, levels, now, this.a4);
+    const runs = ribbonRuns(points, levels, now, this.a4, { splitProvisional: distinguish });
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);
     for (const run of runs) {
-      const color = pointColor(run.detector, run.provisional);
+      const color = pointColor(run.detector, run.provisional, distinguish);
       const plotted = densifyRibbon(run.vertices).map((vertex) => ({
         x: pitchTimeX(vertex.time, now, layout.plotLeft, layout.plotWidth),
         y: pitchY(vertex.midi, layout.midiHigh, layout.plotTop, layout.plotHeight, true),

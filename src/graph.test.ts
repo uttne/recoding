@@ -55,6 +55,20 @@ describe("pitchVoices", () => {
     expect(voices[0].points.map((item) => item.time)).toEqual([1, 1.01]);
     expect(voices[1].points.map((item) => item.time)).toEqual([1, 1.01]);
   });
+
+  it("keeps an ACF2+ to Basic handoff as one stroke when the colors are unified", () => {
+    const voices = pitchVoices(
+      [
+        point({ time: 1, hz: 440, detector: "acf-basic", provisional: true }),
+        point({ time: 1.01, hz: 440, detector: "acf-basic", provisional: false }),
+      ],
+      1.01,
+      440,
+      { splitProvisional: false },
+    );
+    expect(voices).toHaveLength(1);
+    expect(voices[0].points.map((item) => item.time)).toEqual([1, 1.01]);
+  });
 });
 
 describe("PitchGraph", () => {

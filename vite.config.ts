@@ -1,3 +1,5 @@
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
 import { cpSync, createReadStream, mkdirSync, rmSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite";
@@ -51,7 +53,7 @@ if (!isDataURI(wasmBinaryFile)) {
 }
 
 export default defineConfig({
-  plugins: [ortRuntime(), flacWasm()],
+  plugins: [react(), tailwindcss(), ortRuntime(), flacWasm()],
   optimizeDeps: {
     exclude: ["libflacjs"],
   },

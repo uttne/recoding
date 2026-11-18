@@ -1,5 +1,5 @@
 import type { DetectorId, PitchPoint } from "./audio/engine";
-import { pitchVoices } from "./graph";
+import { pitchVoices, type VoiceOptions } from "./graph";
 import { levelNear, rmsToDb, type LevelSample } from "./loudness";
 
 /** At or below this level the pitch line is only its core. */
@@ -101,9 +101,10 @@ export function ribbonRuns(
   levels: readonly LevelSample[],
   now: number,
   a4: number,
+  options: VoiceOptions = {},
 ): RibbonRun[] {
   const runs: RibbonRun[] = [];
-  for (const voice of pitchVoices(points, now, a4)) {
+  for (const voice of pitchVoices(points, now, a4, options)) {
     if (voice.points.length < 2) continue;
     const smoothed = medianLoudness(
       voice.points.map((point) => {
