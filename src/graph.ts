@@ -1,5 +1,6 @@
 import { hzToMidi, noteName } from "./audio/notes";
 import type { DetectorId, PitchPoint } from "./audio/engine";
+import { scaleRole, type ScaleChoice } from "./scale";
 
 export const MIDI_LOW = 30;
 export const MIDI_HIGH = 108;
@@ -80,6 +81,8 @@ export type GraphStyle = {
   guides: boolean;
   /** Wash the time that a lagging detector has not confirmed. */
   pending: boolean;
+  /** Chord scale for the pitch grid. Omitted means every semitone. */
+  scale?: ScaleChoice;
 };
 
 export type GraphFrame = {
@@ -236,22 +239,37 @@ export function paintPitchTimeAxes(
   ctx.textBaseline = "middle";
   ctx.lineWidth = 1;
 
+  const scale = frame.style?.scale ?? { kind: "chromatic" as const };
   for (let midi = MIDI_LOW; midi <= midiHigh; midi++) {
     const y = yAt(midi);
     const pitchClass = ((midi % 12) + 12) % 12;
-    const isC = pitchClass === 0;
-    const isNatural = pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
-    ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+    if (scale.kind === "chromatic") {
+      const isC = pitchClass === 0;
+      const isNatural = pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
+      ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+      ctx.beginPath();
+      ctx.moveTo(plotLeft, y);
+      ctx.lineTo(plotLeft + plotWidth, y);
+      ctx.stroke();
+      if (isC) {
+        const octave = Math.floor(midi / 12) - 1;
+        ctx.fillStyle = "rgba(243,234,215,0.72)";
+        ctx.textAlign = "right";
+        ctx.fillText(`C${octave}`, plotLeft - 8 * ratio, y);
+      }
+      continue;
+    }
+    const role = scaleRole(pitchClass, scale);
+    if (!role) continue;
+    ctx.strokeStyle = role === "root" ? "rgba(243,234,215,0.55)" : role === "chord" ? "rgba(243,234,215,0.28)" : "rgba(243,234,215,0.12)";
     ctx.beginPath();
     ctx.moveTo(plotLeft, y);
     ctx.lineTo(plotLeft + plotWidth, y);
     ctx.stroke();
-    if (isC) {
-      const octave = Math.floor(midi / 12) - 1;
-      ctx.fillStyle = "rgba(243,234,215,0.72)";
-      ctx.textAlign = "right";
-      ctx.fillText(`C${octave}`, plotLeft - 8 * ratio, y);
-    }
+    if (role !== "root") continue;
+    ctx.fillStyle = "rgba(243,234,215,0.86)";
+    ctx.textAlign = "right";
+    ctx.fillText(noteName(midi), plotLeft - 8 * ratio, y);
   }
 
   if (pendingFrom != null && pendingFrom < now && ranges) {

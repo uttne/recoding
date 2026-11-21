@@ -12,6 +12,7 @@ import {
   type FrequencyRange,
   type GraphFrame,
 } from "./graph";
+import { scaleRole, type ScaleChoice } from "./scale";
 import { DB_CEIL, DB_FLOOR, loudnessMarks, loudnessX, loudnessY, type LevelSample } from "./loudness";
 
 function pixelRatio(): number {
@@ -28,6 +29,7 @@ export class LoudnessGraph {
   private a4 = 440;
   private midiHigh = MIDI_HIGH;
   private distinguish = true;
+  private scale: ScaleChoice = { kind: "chromatic" };
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -51,6 +53,7 @@ export class LoudnessGraph {
     const ranges = frame.ranges;
     const guides = frame.style?.guides !== false;
     this.distinguish = frame.style?.distinguish !== false;
+    this.scale = frame.style?.scale ?? { kind: "chromatic" };
     this.midiHigh = viewMidiHigh(ranges, this.a4);
     const { ctx, canvas } = this;
     const width = canvas.width;
@@ -110,20 +113,37 @@ export class LoudnessGraph {
     for (let midi = MIDI_LOW; midi <= this.midiHigh; midi++) {
       const x = loudnessX(midi, left, width, MIDI_LOW, this.midiHigh);
       const pitchClass = ((midi % 12) + 12) % 12;
-      const isC = pitchClass === 0;
-      const isNatural =
-        pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
-      ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+      const labelAt = () => {
+        ctx.textAlign = x < left + 18 * ratio ? "left" : x > left + width - 18 * ratio ? "right" : "center";
+        ctx.textBaseline = "top";
+      };
+      if (this.scale.kind === "chromatic") {
+        const isC = pitchClass === 0;
+        const isNatural =
+          pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
+        ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+        if (!isC) continue;
+        const octave = Math.floor(midi / 12) - 1;
+        ctx.fillStyle = "rgba(243,234,215,0.72)";
+        labelAt();
+        ctx.fillText(`C${octave}`, x, bottom + 6 * ratio);
+        continue;
+      }
+      const role = scaleRole(pitchClass, this.scale);
+      if (!role) continue;
+      ctx.strokeStyle = role === "root" ? "rgba(243,234,215,0.55)" : role === "chord" ? "rgba(243,234,215,0.28)" : "rgba(243,234,215,0.12)";
       ctx.beginPath();
       ctx.moveTo(x, top);
       ctx.lineTo(x, bottom);
       ctx.stroke();
-      if (!isC) continue;
-      const octave = Math.floor(midi / 12) - 1;
-      ctx.fillStyle = "rgba(243,234,215,0.72)";
-      ctx.textAlign = x < left + 18 * ratio ? "left" : x > left + width - 18 * ratio ? "right" : "center";
-      ctx.textBaseline = "top";
-      ctx.fillText(`C${octave}`, x, bottom + 6 * ratio);
+      if (role !== "root") continue;
+      ctx.fillStyle = "rgba(243,234,215,0.86)";
+      labelAt();
+      ctx.fillText(noteName(midi), x, bottom + 6 * ratio);
     }
     ctx.textBaseline = "middle";
   }

@@ -16,6 +16,7 @@ import { LoudnessGraph } from "./loudness-graph";
 import type { LevelSample } from "./loudness";
 import { deleteRecording, listRecordings, readRecording, saveRecording, type RecordingFile } from "./recordings";
 import { RibbonGraph } from "./ribbon-graph";
+import { scaleChoiceFromId, scaleChoiceId, type ScaleChoice } from "./scale";
 
 export type ViewId = "pitch" | "ribbon" | "loudness";
 export type CeilingId = Exclude<DetectorId, "acf-basic" | "basic-poly">;
@@ -72,6 +73,7 @@ export type Snapshot = {
   distinguish: boolean;
   guides: boolean;
   pending: boolean;
+  scaleId: string;
   csvDisabled: boolean;
 };
 
@@ -110,6 +112,7 @@ let view: ViewId = "pitch";
 let distinguish = false;
 let guides = true;
 let pending = false;
+let scale: ScaleChoice = { kind: "chromatic" };
 let selectedId: string | null = null;
 let playingId: string | null = null;
 let storing = false;
@@ -182,6 +185,7 @@ function build(): Snapshot {
     distinguish,
     guides,
     pending,
+    scaleId: scaleChoiceId(scale),
     csvDisabled: points.length === 0,
   };
 }
@@ -225,6 +229,7 @@ let snapshot: Snapshot = {
   distinguish,
   guides,
   pending,
+  scaleId: "chromatic",
   csvDisabled: true,
 };
 
@@ -412,7 +417,7 @@ export function mountStage(root: HTMLElement, canvases: {
     const graphFrame = {
       pendingFrom: pending ? pendingFrom() : null,
       ranges: ranges(),
-      style: { distinguish, guides, pending },
+      style: { distinguish, guides, pending, scale },
     };
     pitch.setA4(a4);
     ribbon.setA4(a4);
@@ -620,6 +625,11 @@ export function setGuides(next: boolean): void {
 
 export function setPending(next: boolean): void {
   pending = next;
+  publish();
+}
+
+export function setScale(id: string): void {
+  scale = scaleChoiceFromId(id);
   publish();
 }
 

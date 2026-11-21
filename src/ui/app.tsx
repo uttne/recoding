@@ -3,6 +3,7 @@ import * as Switch from "@radix-ui/react-switch";
 import { ChevronLeft, ChevronRight, Circle, Download, Mic, Play, Settings as SettingsIcon, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import type { AudioFormat } from "../audio/encode";
+import { SCALE_GROUPS } from "../scale";
 import type { DetectorId } from "../audio/engine";
 import {
   CEILING_FIELDS,
@@ -21,6 +22,7 @@ import {
   setFormat,
   setGuides,
   setPending,
+  setScale,
   setView,
   selectRecording,
   stepRecording,
@@ -104,6 +106,27 @@ export function App() {
             </button>
           ))}
         </div>
+
+        <label className="sr-only" htmlFor="scale">
+          スケール
+        </label>
+        <select
+          id="scale"
+          className="h-11 max-w-40 rounded-full border border-line bg-panel px-3 text-sm"
+          value={state.scaleId}
+          onChange={(event) => setScale(event.target.value)}
+        >
+          <option value="chromatic">半音</option>
+          {SCALE_GROUPS.map((group) => (
+            <optgroup key={group.quality} label={group.label}>
+              {group.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
 
         <div className="ml-auto flex items-center gap-2">
           <IconButton label="前の録音" disabled={!state.canStep} onClick={() => stepRecording(-1)}>
