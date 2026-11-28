@@ -12,12 +12,16 @@ export function Header({ onOpenSettings }: { onOpenSettings: () => void }) {
   const confidence = useSessionSlice((state) => state.confidence);
   const status = useSessionSlice((state) => state.status);
   return (
-    <header className="flex items-end justify-between gap-3 px-3 pt-2 pb-2 sm:px-4 sm:pt-3">
-      <div className="min-w-0">
-        <p className="text-xs tracking-[0.14em] text-muted">ピッチ</p>
-        <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
-          <p className={`truncate leading-none ${chord ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl"}`}>{note}</p>
-          <p className="truncate text-xs text-muted sm:text-sm">
+    <header className="flex h-[5.5rem] shrink-0 items-end justify-between gap-3 overflow-hidden px-3 pt-2 pb-2 sm:h-[6.5rem] sm:px-4 sm:pt-3">
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-xs tracking-[0.14em] text-muted">ピッチ</p>
+        <div className="mt-1 flex h-9 min-w-0 items-center gap-x-4 overflow-hidden sm:h-12">
+          <p
+            className={`min-w-0 max-w-[55%] truncate leading-none ${chord ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl"}`}
+          >
+            {note}
+          </p>
+          <p className="min-w-0 flex-1 truncate text-xs text-muted tabular-nums sm:text-sm">
             {hz}
             <span className="px-1.5 text-ink/30">/</span>
             {cents}
