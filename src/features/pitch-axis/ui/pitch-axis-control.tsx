@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
 import { noteName } from "@/audio/notes";
 import type { PitchAxisMode } from "@/entities/pitch/model/pitch-axis";
 import { Button } from "@/shared/ui/button";
 import { nativeSelectClass } from "@/shared/ui/native-select";
+import { NumberField } from "@/shared/ui/number-field";
 
 const AXIS_MODES: { id: PitchAxisMode; label: string }[] = [
   { id: "full", label: "全体" },
@@ -71,31 +71,21 @@ export function PitchAxisControl({
 }
 
 export function MidiBound({ id, label, value, onCommit }: { id: string; label: string; value: number; onCommit: (value: number) => void }) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => setText(String(value)), [value]);
   const selected = String(Math.min(127, Math.max(0, Math.round(value))));
+  const midiLabel = `${label}のMIDI`;
   return (
     <div className="flex items-center gap-2">
-      <div className="flex h-11 items-center gap-2 rounded-full border border-line bg-panel px-3 text-sm">
+      <div className="flex min-h-11 items-center gap-1 rounded-full border border-line bg-panel pr-1 pl-3 text-sm">
         <span className="text-muted">{label}</span>
-        <input
+        <NumberField
           id={id}
-          className="w-12 bg-transparent outline-none"
-          type="number"
+          inputLabel={midiLabel}
           min={0}
           max={127}
-          step={1}
-          aria-label={`${label}のMIDI`}
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onBlur={() => {
-            const next = Number(text);
-            if (!Number.isFinite(next)) {
-              setText(String(value));
-              return;
-            }
-            onCommit(next);
-          }}
+          value={value}
+          onCommit={onCommit}
+          align="right"
+          commitOutside
         />
       </div>
       <select
@@ -120,28 +110,18 @@ export function MidiBound({ id, label, value, onCommit }: { id: string; label: s
 }
 
 function OctaveWidth({ value, onCommit }: { value: number; onCommit: (value: number) => void }) {
-  const [text, setText] = useState(String(value));
-  useEffect(() => setText(String(value)), [value]);
   return (
-    <label className="flex h-11 items-center gap-2 rounded-full border border-line bg-panel px-3 text-sm" htmlFor="axis-octaves">
+    <label className="flex min-h-11 items-center gap-1 rounded-full border border-line bg-panel px-3 text-sm" htmlFor="axis-octaves">
       <span className="text-muted">幅</span>
-      <input
+      <NumberField
         id="axis-octaves"
-        className="w-12 bg-transparent outline-none"
-        type="number"
+        inputLabel="幅"
         min={1}
         max={5}
         step={0.5}
-        value={text}
-        onChange={(event) => setText(event.target.value)}
-        onBlur={() => {
-          const next = Number(text);
-          if (!Number.isFinite(next)) {
-            setText(String(value));
-            return;
-          }
-          onCommit(next);
-        }}
+        value={value}
+        onCommit={onCommit}
+        commitOutside
       />
       <span className="text-muted">oct</span>
     </label>
