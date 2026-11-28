@@ -9,6 +9,9 @@ import {
   detectorLimitLabel,
   pointColor,
   viewMidiHigh,
+  chromaticGridTier,
+  pitchGridStroke,
+  scaleGridTier,
   type FrequencyRange,
   type GraphFrame,
 } from "./graph";
@@ -75,7 +78,6 @@ export class LoudnessGraph {
 
     ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
     ctx.textBaseline = "middle";
-    ctx.lineWidth = 1;
     this.drawPitchGrid(plotLeft, plotTop, plotWidth, plotHeight, ratio);
     this.drawDbGrid(plotLeft, plotTop, plotWidth, plotHeight, ratio);
 
@@ -121,15 +123,15 @@ export class LoudnessGraph {
         ctx.textBaseline = "top";
       };
       if (this.scale.kind === "chromatic") {
-        const isC = pitchClass === 0;
-        const isNatural =
-          pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
-        ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+        const tier = chromaticGridTier(pitchClass);
+        const stroke = pitchGridStroke(tier, "chromatic", ratio);
+        ctx.lineWidth = stroke.lineWidth;
+        ctx.strokeStyle = stroke.strokeStyle;
         ctx.beginPath();
         ctx.moveTo(x, top);
         ctx.lineTo(x, bottom);
         ctx.stroke();
-        if (!isC) continue;
+        if (tier !== "main") continue;
         const octave = Math.floor(midi / 12) - 1;
         ctx.fillStyle = "rgba(243,234,215,0.72)";
         labelAt();
@@ -138,7 +140,9 @@ export class LoudnessGraph {
       }
       const role = scaleRole(pitchClass, this.scale);
       if (!role) continue;
-      ctx.strokeStyle = role === "root" ? "rgba(243,234,215,0.55)" : role === "chord" ? "rgba(243,234,215,0.28)" : "rgba(243,234,215,0.12)";
+      const stroke = pitchGridStroke(scaleGridTier(role), "scale", ratio);
+      ctx.lineWidth = stroke.lineWidth;
+      ctx.strokeStyle = stroke.strokeStyle;
       ctx.beginPath();
       ctx.moveTo(x, top);
       ctx.lineTo(x, bottom);
@@ -153,6 +157,7 @@ export class LoudnessGraph {
 
   private drawDbGrid(left: number, top: number, width: number, height: number, ratio: number): void {
     const { ctx } = this;
+    ctx.lineWidth = 1;
     ctx.strokeStyle = "rgba(243,234,215,0.12)";
     ctx.fillStyle = "rgba(243,234,215,0.72)";
     ctx.textAlign = "right";

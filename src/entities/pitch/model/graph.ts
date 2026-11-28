@@ -1,7 +1,7 @@
 import { hzToMidi, noteName } from "../../../audio/notes";
 import type { DetectorId, PitchPoint } from "../../../audio/engine";
 import { droppedByLevel, levelDbAt, type LevelSample } from "./loudness";
-import { scaleRole, type ScaleChoice } from "./scale";
+import { scaleRole, type ScaleChoice, type ScaleRole } from "./scale";
 
 export const MIDI_LOW = 30;
 export const MIDI_HIGH = 108;
@@ -209,6 +209,64 @@ export type PitchTimeLayout = {
   midiHigh: number;
 };
 
+/** Sung pitch stroke in CSS pixels. Thicker than every pitch-grid tier. */
+export const PITCH_TRACE_CSS = 3.4;
+
+/**
+ * Pitch-grid stroke in CSS pixels, before `devicePixelRatio`.
+ * The steps stay far enough apart that each tier keeps its own pixel width
+ * on a 1.25x display, and the sung trace stays thicker than the main line.
+ * Main is C, or the scale root. Middle is another white key, or a chord tone.
+ * Guide is a black key, or any other scale degree.
+ */
+export const PITCH_GRID_CSS = {
+  main: 2.5,
+  middle: 1.7,
+  guide: 1,
+} as const;
+
+export type PitchGridTier = keyof typeof PITCH_GRID_CSS;
+
+const CHROMATIC_GRID_COLOR: Record<PitchGridTier, string> = {
+  main: "rgba(243,234,215,0.28)",
+  middle: "rgba(243,234,215,0.12)",
+  guide: "rgba(243,234,215,0.05)",
+};
+
+const SCALE_GRID_COLOR: Record<PitchGridTier, string> = {
+  main: "rgba(243,234,215,0.55)",
+  middle: "rgba(243,234,215,0.28)",
+  guide: "rgba(243,234,215,0.12)",
+};
+
+const WHITE_KEY_PITCH_CLASS = new Set([2, 4, 5, 7, 9, 11]);
+
+/** C is the heavy line. The other white keys sit between C and the black keys. */
+export function chromaticGridTier(pitchClass: number): PitchGridTier {
+  const pc = ((pitchClass % 12) + 12) % 12;
+  if (pc === 0) return "main";
+  if (WHITE_KEY_PITCH_CLASS.has(pc)) return "middle";
+  return "guide";
+}
+
+/** Root, chord tone, then the remaining scale degree. Same weights as the chromatic grid. */
+export function scaleGridTier(role: ScaleRole): PitchGridTier {
+  if (role === "root") return "main";
+  if (role === "chord") return "middle";
+  return "guide";
+}
+
+export function pitchGridStroke(
+  tier: PitchGridTier,
+  kind: "chromatic" | "scale",
+  ratio: number,
+): { lineWidth: number; strokeStyle: string } {
+  return {
+    lineWidth: PITCH_GRID_CSS[tier] * ratio,
+    strokeStyle: (kind === "chromatic" ? CHROMATIC_GRID_COLOR : SCALE_GRID_COLOR)[tier],
+  };
+}
+
 export function pitchPixelRatio(): number {
   if (typeof window === "undefined") return 1;
   return window.devicePixelRatio || 1;
@@ -257,21 +315,21 @@ export function paintPitchTimeAxes(
 
   ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
   ctx.textBaseline = "middle";
-  ctx.lineWidth = 1;
 
   const scale = frame.style?.scale ?? { kind: "chromatic" as const };
   for (let midi = Math.ceil(midiLow); midi <= Math.floor(midiHigh); midi++) {
     const y = yAt(midi);
     const pitchClass = ((midi % 12) + 12) % 12;
     if (scale.kind === "chromatic") {
-      const isC = pitchClass === 0;
-      const isNatural = pitchClass === 0 || pitchClass === 2 || pitchClass === 4 || pitchClass === 5 || pitchClass === 7 || pitchClass === 9 || pitchClass === 11;
-      ctx.strokeStyle = isC ? "rgba(243,234,215,0.28)" : isNatural ? "rgba(243,234,215,0.12)" : "rgba(243,234,215,0.05)";
+      const tier = chromaticGridTier(pitchClass);
+      const stroke = pitchGridStroke(tier, "chromatic", ratio);
+      ctx.lineWidth = stroke.lineWidth;
+      ctx.strokeStyle = stroke.strokeStyle;
       ctx.beginPath();
       ctx.moveTo(plotLeft, y);
       ctx.lineTo(plotLeft + plotWidth, y);
       ctx.stroke();
-      if (isC) {
+      if (tier === "main") {
         const octave = Math.floor(midi / 12) - 1;
         ctx.fillStyle = "rgba(243,234,215,0.72)";
         ctx.textAlign = "right";
@@ -281,7 +339,9 @@ export function paintPitchTimeAxes(
     }
     const role = scaleRole(pitchClass, scale);
     if (!role) continue;
-    ctx.strokeStyle = role === "root" ? "rgba(243,234,215,0.55)" : role === "chord" ? "rgba(243,234,215,0.28)" : "rgba(243,234,215,0.12)";
+    const stroke = pitchGridStroke(scaleGridTier(role), "scale", ratio);
+    ctx.lineWidth = stroke.lineWidth;
+    ctx.strokeStyle = stroke.strokeStyle;
     ctx.beginPath();
     ctx.moveTo(plotLeft, y);
     ctx.lineTo(plotLeft + plotWidth, y);
@@ -391,7 +451,7 @@ export class PitchGraph {
     const layout = paintPitchTimeAxes(this.ctx, this.canvas.width, this.canvas.height, now, this.a4, frame);
     const { ctx } = this;
     const { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiLow, midiHigh } = layout;
-    ctx.lineWidth = 2.4 * ratio;
+    ctx.lineWidth = PITCH_TRACE_CSS * ratio;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const distinguish = frame.style?.distinguish !== false;

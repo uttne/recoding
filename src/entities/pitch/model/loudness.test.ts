@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PitchPoint } from "../../../audio/engine";
+import { PITCH_GRID_CSS, pitchGridStroke, type GraphStyle } from "./graph";
 import { LoudnessGraph } from "./loudness-graph";
 import { droppedByLevel, keepsLevel, levelDbAt, levelNear, loudnessMarks, loudnessX, loudnessY, rmsToDb, type LevelSample } from "./loudness";
 
@@ -172,6 +173,119 @@ describe("LoudnessGraph", () => {
     graph.draw([point({ time: 1, hz: 440 })], [{ time: 1, rms: 0.1 }], 5);
     expect(arcs).toHaveLength(1);
     expect(arcs[0][2]).toBeCloseTo(3.2, 5);
+  });
+});
+
+type RecordedStroke = { lineWidth: number; strokeStyle: string; x0: number; y0: number; x1: number; y1: number };
+
+function recordingContext(): { ctx: CanvasRenderingContext2D; strokes: RecordedStroke[] } {
+  const strokes: RecordedStroke[] = [];
+  let lineWidth = 1;
+  let strokeStyle = "";
+  let x0 = 0;
+  let y0 = 0;
+  let x1 = 0;
+  let y1 = 0;
+  const ctx = new Proxy({} as CanvasRenderingContext2D, {
+    get(_target, prop) {
+      if (prop === "stroke") return () => strokes.push({ lineWidth, strokeStyle, x0, y0, x1, y1 });
+      if (prop === "moveTo") {
+        return (x: number, y: number) => {
+          x0 = x;
+          y0 = y;
+          x1 = x;
+          y1 = y;
+        };
+      }
+      if (prop === "lineTo") {
+        return (x: number, y: number) => {
+          x1 = x;
+          y1 = y;
+        };
+      }
+      return () => undefined;
+    },
+    set(_target, prop, value) {
+      if (prop === "lineWidth") lineWidth = Number(value);
+      if (prop === "strokeStyle") strokeStyle = String(value);
+      return true;
+    },
+  });
+  return { ctx, strokes };
+}
+
+const octave: GraphStyle = {
+  guides: false,
+  pending: false,
+  distinguish: false,
+  pitchSpan: { low: 60, high: 72 },
+};
+
+function pitchWidths(strokes: RecordedStroke[], strokeStyle: string): number[] {
+  return strokes
+    .filter((stroke) => stroke.strokeStyle === strokeStyle && stroke.x0 === stroke.x1)
+    .map((stroke) => stroke.lineWidth);
+}
+
+describe("loudness pitch grid weight", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function draw(style: GraphStyle): RecordedStroke[] {
+    const { ctx, strokes } = recordingContext();
+    const canvas = {
+      width: 800,
+      height: 300,
+      clientWidth: 800,
+      clientHeight: 300,
+      getContext: () => ctx,
+    };
+    new LoudnessGraph(canvas as unknown as HTMLCanvasElement).draw([], [], 1, { style });
+    return strokes;
+  }
+
+  it("uses the same chromatic weights as the time-pitch grid", () => {
+    const strokes = draw({ ...octave, scale: { kind: "chromatic" } });
+    const c = pitchWidths(strokes, "rgba(243,234,215,0.28)");
+    const white = pitchWidths(strokes, "rgba(243,234,215,0.12)");
+    const black = pitchWidths(strokes, "rgba(243,234,215,0.05)");
+    expect(c).toHaveLength(2);
+    expect(white).toHaveLength(6);
+    expect(black).toHaveLength(5);
+    expect(c[0]).toBe(pitchGridStroke("main", "chromatic", 1).lineWidth);
+    expect(white[0]).toBe(pitchGridStroke("middle", "chromatic", 1).lineWidth);
+    expect(black[0]).toBe(pitchGridStroke("guide", "chromatic", 1).lineWidth);
+    expect(c[0]).toBeGreaterThan(white[0]);
+    expect(white[0]).toBeGreaterThan(black[0]);
+    const levels = strokes.filter((stroke) => stroke.y0 === stroke.y1);
+    expect(levels.length).toBeGreaterThan(0);
+    expect(levels.every((stroke) => stroke.lineWidth === 1)).toBe(true);
+  });
+
+  it("uses the same scale weights as the time-pitch grid", () => {
+    const strokes = draw({ ...octave, scale: { kind: "chord", root: 0, quality: "major" } });
+    const vertical = strokes.filter((stroke) => stroke.x0 === stroke.x1);
+    const root = pitchWidths(strokes, "rgba(243,234,215,0.55)");
+    const chord = pitchWidths(strokes, "rgba(243,234,215,0.28)");
+    const degree = pitchWidths(strokes, "rgba(243,234,215,0.12)");
+    expect(vertical).toHaveLength(8);
+    expect(root).toHaveLength(2);
+    expect(chord).toHaveLength(2);
+    expect(degree).toHaveLength(4);
+    expect(root[0]).toBe(pitchGridStroke("main", "scale", 1).lineWidth);
+    expect(chord[0]).toBe(pitchGridStroke("middle", "scale", 1).lineWidth);
+    expect(degree[0]).toBe(pitchGridStroke("guide", "scale", 1).lineWidth);
+    expect(root[0]).toBeGreaterThan(chord[0]);
+    expect(chord[0]).toBeGreaterThan(degree[0]);
+  });
+
+  it("multiplies the pitch lines by the device pixel ratio", () => {
+    vi.stubGlobal("window", { devicePixelRatio: 2 });
+    const strokes = draw({ ...octave, scale: { kind: "chromatic" } });
+    expect(pitchWidths(strokes, "rgba(243,234,215,0.05)")[0]).toBe(PITCH_GRID_CSS.guide * 2);
+    expect(pitchWidths(strokes, "rgba(243,234,215,0.28)")[0]).toBe(PITCH_GRID_CSS.main * 2);
+    expect(pitchWidths(strokes, "rgba(243,234,215,0.05)")[0]).toBeGreaterThan(1);
   });
 });
 
