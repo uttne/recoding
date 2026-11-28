@@ -1,13 +1,19 @@
+import { useEffect, useRef } from "react";
+import { BoundingBox, Clef, KeySignature, Renderer, Stave } from "vexflow/bravura";
 import type { KeyAccidental } from "@/entities/pitch/model/scale";
 
-const LINE_GAP = 10;
-const BOTTOM_Y = 58;
-const STEP_Y = LINE_GAP / 2;
-const FIRST_ACCIDENTAL = 34;
-const SLOT = 14;
+let bravuraReady: Promise<void> | undefined;
 
-function staffY(step: number): number {
-  return BOTTOM_Y - step * STEP_Y;
+function whenBravuraReady(): Promise<void> {
+  if (!bravuraReady) {
+    bravuraReady = import("vexflow/bravura").then(async () => {
+      await document.fonts.load("20px Bravura");
+      if (!document.fonts.check("20px Bravura")) {
+        throw new Error("Bravura did not load");
+      }
+    });
+  }
+  return bravuraReady;
 }
 
 function signatureLabel(accidentals: readonly KeyAccidental[]): string {
@@ -16,69 +22,93 @@ function signatureLabel(accidentals: readonly KeyAccidental[]): string {
   return `調号 ${names.join("、")}`;
 }
 
-function sharpBar(center: number): string {
-  const half = 1.15;
-  const rise = -2.5;
-  const x0 = -5.8;
-  const x1 = 5.8;
-  const y0 = center;
-  const y1 = center + rise;
-  return `${x0},${y0 - half} ${x1},${y1 - half} ${x1},${y1 + half} ${x0},${y0 + half}`;
+function signatureBounds(stave: Stave): BoundingBox {
+  const parts: BoundingBox[] = [];
+  for (const modifier of stave.getModifiers()) {
+    if (modifier instanceof Clef) parts.push(modifier.getInkBounds());
+    if (modifier instanceof KeySignature) parts.push(...modifier.getInkParts());
+  }
+  const top = stave.getYForLine(0);
+  const bottom = stave.getYForLine(stave.getNumLines() - 1);
+  parts.push(new BoundingBox(stave.getX(), top, stave.getWidth(), Math.max(bottom - top, 1)));
+  const first = parts[0];
+  const bounds = new BoundingBox(first.getX(), first.getY(), first.getW(), first.getH());
+  for (const part of parts.slice(1)) bounds.mergeWith(part);
+  return bounds;
 }
 
-function SharpMark() {
-  return (
-    <g fill="currentColor">
-      <rect x={-2.35} y={-9} width={1.35} height={18} rx={0.3} />
-      <rect x={1.05} y={-9} width={1.35} height={18} rx={0.3} />
-      <polygon points={sharpBar(2.2)} />
-      <polygon points={sharpBar(-2.2)} />
-    </g>
-  );
-}
+function drawSignature(host: HTMLDivElement, accidentals: readonly KeyAccidental[]): void {
+  host.replaceChildren();
+  const renderer = new Renderer(host, Renderer.Backends.SVG);
+  renderer.resize(320, 180);
+  const context = renderer.getContext();
+  context.setFillStyle("currentColor");
+  context.setStrokeStyle("currentColor");
 
-function FlatMark() {
-  return (
-    <g fill="currentColor">
-      <rect x={-1.2} y={-16} width={1.7} height={20} />
-      <path d="M0.5 -3.2 C2.4 -5.4 8.1 -3.8 8.1 0.3 C8.1 4.2 2.6 5.8 0.5 3.6 L0.5 -3.2 Z" />
-    </g>
-  );
-}
+  const stave = new Stave(0, 0, 300, { leftBar: false, rightBar: false });
+  stave.addClef("treble");
+  if (accidentals.length > 0) {
+    // The constructor key is discarded. setOrdered places the accidentals from keySignature().
+    const signs = accidentals.map((item) => ({
+      type: item.kind === "sharp" ? "#" : "b",
+      line: (8 - item.staffStep) / 2,
+    }));
+    stave.addModifier(new KeySignature("C").setOrdered(signs));
+  }
+  stave.setWidth(stave.getNoteStartX() - stave.getX() + 4);
+  stave.setContext(context).draw();
 
-function TrebleClef() {
-  return (
-    <path
-      d="M16.6 65.5C7.8 64 4.6 54.2 9.8 47.2C14.2 41.2 23 42.6 22.6 49.2C22.2 55.2 15 58.2 12.8 52C11.2 47.4 15.2 44.4 17.8 46.6C19.4 48 18.4 51 16.7 50.2C16.5 41.5 15.8 27 16.2 15.5C16.6 7.2 23.8 2.4 29 9C34 15.4 29.6 24.4 22.8 24.2C18.2 24 15.6 19.2 18 14.2"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  );
+  const svg = host.querySelector("svg");
+  if (!svg) return;
+  svg.setAttribute("fill", "currentColor");
+  svg.setAttribute("stroke", "currentColor");
+  const box = signatureBounds(stave);
+  const pad = 2;
+  svg.setAttribute("viewBox", `${box.getX() - pad} ${box.getY() - pad} ${box.getW() + pad * 2} ${box.getH() + pad * 2}`);
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.style.removeProperty("width");
+  svg.style.removeProperty("height");
+  host.style.removeProperty("width");
+  host.style.removeProperty("height");
+
+  const glyphs = svg.querySelectorAll("text");
+  accidentals.forEach((item, index) => {
+    const glyph = glyphs[index + 1];
+    if (!glyph) return;
+    glyph.setAttribute("data-letter", item.letter);
+    glyph.setAttribute("data-kind", item.kind);
+    glyph.setAttribute("data-staff-step", String(item.staffStep));
+  });
 }
 
 export function KeySignatureIcon({ accidentals }: { accidentals: readonly KeyAccidental[] }) {
-  const width = accidentals.length === 0 ? 48 : FIRST_ACCIDENTAL + (accidentals.length - 1) * SLOT + 12;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const signatureKey = accidentals.map((item) => `${item.kind}:${item.letter}:${item.staffStep}`).join("|");
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    let cancelled = false;
+    whenBravuraReady()
+      .then(() => {
+        if (!cancelled) drawSignature(host, accidentals);
+      })
+      .catch(() => {
+        if (!cancelled) host.replaceChildren();
+      });
+    return () => {
+      cancelled = true;
+      host.replaceChildren();
+    };
+  }, [accidentals, signatureKey]);
+
   return (
-    <svg viewBox={`0 0 ${width} 76`} className="h-11 w-auto shrink-0 text-ink" role="img" aria-label={signatureLabel(accidentals)}>
-      {[0, 1, 2, 3, 4].map((line) => {
-        const y = staffY(line * 2);
-        return <line key={line} data-line={line + 1} x1={1} x2={width - 1} y1={y} y2={y} stroke="currentColor" strokeWidth={1.25} />;
-      })}
-      <TrebleClef />
-      {accidentals.map((accidental, index) => (
-        <g
-          key={`${accidental.kind}-${accidental.letter}`}
-          data-letter={accidental.letter}
-          data-kind={accidental.kind}
-          data-staff-step={accidental.staffStep}
-          transform={`translate(${FIRST_ACCIDENTAL + index * SLOT} ${staffY(accidental.staffStep)})`}
-        >
-          {accidental.kind === "sharp" ? <SharpMark /> : <FlatMark />}
-        </g>
-      ))}
-    </svg>
+    <div
+      ref={hostRef}
+      className="inline-flex h-11 shrink-0 items-center text-ink [&_svg]:h-full [&_svg]:w-auto"
+      role="img"
+      aria-label={signatureLabel(accidentals)}
+    />
   );
 }
