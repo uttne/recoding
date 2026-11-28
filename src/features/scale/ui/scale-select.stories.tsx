@@ -11,3 +11,6 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Chromatic: Story = {};
+export const EMajor: Story = { args: { value: "major:4" } };
+export const EMinor: Story = { args: { value: "minor:4" } };
+export const FMajor: Story = { args: { value: "major:5" } };

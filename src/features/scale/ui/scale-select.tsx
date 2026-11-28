@@ -1,9 +1,11 @@
-import { SCALE_GROUPS } from "@/entities/pitch/model/scale";
+import { SCALE_GROUPS, keySignature, scaleChoiceFromId } from "@/entities/pitch/model/scale";
 import { nativeSelectClass } from "@/shared/ui/native-select";
+import { KeySignatureIcon } from "./key-signature";
 
 export function ScaleSelect({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const signature = keySignature(scaleChoiceFromId(value));
   return (
-    <>
+    <div className="flex min-w-0 flex-1 items-center gap-1.5 md:flex-none">
       <label className="sr-only" htmlFor="scale">
         スケール
       </label>
@@ -24,6 +26,7 @@ export function ScaleSelect({ value, onChange }: { value: string; onChange: (id:
           </optgroup>
         ))}
       </select>
-    </>
+      {signature !== null && <KeySignatureIcon accidentals={signature} />}
+    </div>
   );
 }
