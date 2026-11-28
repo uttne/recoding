@@ -11,15 +11,18 @@ import { centsOff, hzToMidi, noteName } from "./audio/notes";
 import { PYIN_FMAX_HZ, PYIN_FMIN_HZ } from "./audio/pyin";
 import { SWIFT_FMAX, SWIFT_FMIN } from "./audio/swiftf0";
 import { decodeWav } from "./audio/wav";
-import { PitchGraph, WINDOW_SECONDS, type FrequencyRange, type GraphRanges } from "./graph";
+import { MIDI_LOW, PitchGraph, WINDOW_SECONDS, viewMidiHigh, type FrequencyRange, type GraphRanges } from "./graph";
+import { clampFixedSpan, easePitchSpan, followPitchSpan, type PitchAxisMode, type PitchSpan } from "./pitch-axis";
+
+export type { PitchAxisMode };
 import { LoudnessGraph } from "./loudness-graph";
 import type { LevelSample } from "./loudness";
 import { deleteRecording, listRecordings, readRecording, saveRecording, type RecordingFile } from "./recordings";
 import { RibbonGraph } from "./ribbon-graph";
+import { loadSettings, saveSettings, type CeilingId, type Settings, type ViewId } from "./preferences";
 import { scaleChoiceFromId, scaleChoiceId, type ScaleChoice } from "./scale";
 
-export type ViewId = "pitch" | "ribbon" | "loudness";
-export type CeilingId = Exclude<DetectorId, "acf-basic" | "basic-poly">;
+export type { CeilingId, ViewId };
 
 export const DETECTORS: { id: DetectorId; label: string }[] = [
   { id: "acf-basic", label: "ACF2+ → Basic" },
@@ -74,6 +77,10 @@ export type Snapshot = {
   guides: boolean;
   pending: boolean;
   scaleId: string;
+  axisMode: PitchAxisMode;
+  axisLow: number;
+  axisHigh: number;
+  axisOctaves: number;
   micId: string;
   mics: readonly MicChoice[];
   csvDisabled: boolean;
@@ -115,6 +122,16 @@ let distinguish = false;
 let guides = true;
 let pending = false;
 let scale: ScaleChoice = { kind: "chromatic" };
+export const DEFAULT_AXIS_LOW = 48;
+export const DEFAULT_AXIS_HIGH = 72;
+
+let axisMode: PitchAxisMode = "full";
+let axisLow = DEFAULT_AXIS_LOW;
+let axisHigh = DEFAULT_AXIS_HIGH;
+let axisOctaves = 2;
+let followTarget: PitchSpan | null = null;
+let followShown: PitchSpan | null = null;
+let followAt = 0;
 let micId = "";
 let mics: MicChoice[] = [];
 let selectedId: string | null = null;
@@ -190,6 +207,10 @@ function build(): Snapshot {
     guides,
     pending,
     scaleId: scaleChoiceId(scale),
+    axisMode,
+    axisLow,
+    axisHigh,
+    axisOctaves,
     micId,
     mics,
     csvDisabled: points.length === 0,
@@ -236,6 +257,10 @@ let snapshot: Snapshot = {
   guides,
   pending,
   scaleId: "chromatic",
+  axisMode,
+  axisLow,
+  axisHigh,
+  axisOctaves,
   micId: "",
   mics: [],
   csvDisabled: true,
@@ -422,10 +447,11 @@ export function mountStage(root: HTMLElement, canvases: {
   let frame = 0;
   const paint = () => {
     const now = Math.max(clock, points.at(-1)?.time ?? 0);
+    const pitchSpan = visiblePitchSpan(now);
     const graphFrame = {
       pendingFrom: pending ? pendingFrom() : null,
       ranges: ranges(),
-      style: { distinguish, guides, pending, scale },
+      style: { distinguish, guides, pending, scale, ...(pitchSpan ? { pitchSpan } : {}) },
     };
     pitch.setA4(a4);
     ribbon.setA4(a4);
@@ -593,13 +619,91 @@ export async function removeSelected(): Promise<void> {
   }
 }
 
+function currentSettings(): Settings {
+  return {
+    format,
+    detector: engine.detector,
+    a4,
+    ceilings: {
+      acf2: ceilings.acf2,
+      swiftf0: ceilings.swiftf0,
+      mpm: ceilings.mpm,
+      pyin: ceilings.pyin,
+      crepe: ceilings.crepe,
+      "basic-mono": ceilings["basic-mono"],
+    },
+    view,
+    distinguish,
+    guides,
+    pending,
+    scaleId: scaleChoiceId(scale),
+    axisMode,
+    axisLow,
+    axisHigh,
+    axisOctaves,
+    micId,
+  };
+}
+
+function remember(): void {
+  saveSettings(currentSettings());
+}
+
+function defaultSettings(): Settings {
+  return {
+    format: "wav",
+    detector: "acf-basic",
+    a4: 440,
+    ceilings: {
+      acf2: ACF_FMAX_HZ,
+      swiftf0: SWIFT_FMAX,
+      mpm: MPM_FMAX_HZ,
+      pyin: PYIN_FMAX_HZ,
+      crepe: CREPE_FMAX_HZ,
+      "basic-mono": BASIC_FMAX_HZ,
+    },
+    view: "pitch",
+    distinguish: false,
+    guides: true,
+    pending: false,
+    scaleId: "chromatic",
+    axisMode: "full",
+    axisLow: DEFAULT_AXIS_LOW,
+    axisHigh: DEFAULT_AXIS_HIGH,
+    axisOctaves: 2,
+    micId: "",
+  };
+}
+
+function restoreSettings(): void {
+  const stored = loadSettings(defaultSettings());
+  format = stored.format;
+  a4 = stored.a4;
+  view = stored.view;
+  distinguish = stored.distinguish;
+  guides = stored.guides;
+  pending = stored.pending;
+  scale = scaleChoiceFromId(stored.scaleId);
+  axisMode = stored.axisMode;
+  axisLow = stored.axisLow;
+  axisHigh = stored.axisHigh;
+  axisOctaves = stored.axisOctaves;
+  micId = stored.micId;
+  for (const field of CEILING_FIELDS) ceilings[field.id] = stored.ceilings[field.id];
+  engine.detector = stored.detector;
+  engine.micId = stored.micId;
+  applyCeilings();
+}
+
 export function setView(next: ViewId): void {
   view = next;
+  remember();
   publish();
 }
 
 export function setFormat(next: AudioFormat): void {
   format = next;
+  remember();
   publish();
 }
 
@@ -607,12 +711,14 @@ export function setDetector(next: DetectorId): void {
   engagedAt = clock;
   engine.detector = next;
   engine.preloadModel();
+  remember();
   publish();
 }
 
 export function setA4(next: number): void {
   if (!Number.isFinite(next) || next < 415 || next > 466) return;
   a4 = next;
+  remember();
   publish();
 }
 
@@ -622,27 +728,99 @@ export function setCeiling(id: CeilingId, next: number): void {
   ceilings[id] = next;
   if (id === "basic-mono") ceilings["basic-poly"] = next;
   applyCeilings();
+  remember();
   publish();
 }
 
 export function setDistinguish(next: boolean): void {
   distinguish = next;
+  remember();
   publish();
 }
 
 export function setGuides(next: boolean): void {
   guides = next;
+  remember();
   publish();
 }
 
 export function setPending(next: boolean): void {
   pending = next;
+  remember();
   publish();
 }
 
 export function setScale(id: string): void {
   scale = scaleChoiceFromId(id);
+  remember();
   publish();
+}
+
+export function setAxisMode(mode: PitchAxisMode): void {
+  axisMode = mode;
+  if (mode !== "follow") {
+    followTarget = null;
+    followShown = null;
+    followAt = 0;
+  }
+  remember();
+  publish();
+}
+
+export function setAxisLow(value: number): void {
+  const low = Math.min(127, Math.max(0, Math.round(value)));
+  axisLow = low;
+  if (axisHigh < low + 12) axisHigh = Math.min(127, low + 12);
+  remember();
+  publish();
+}
+
+export function setAxisHigh(value: number): void {
+  const high = Math.min(127, Math.max(0, Math.round(value)));
+  axisHigh = high;
+  if (axisLow > high - 12) axisLow = Math.max(0, high - 12);
+  remember();
+  publish();
+}
+
+export function resetFixedAxis(): void {
+  axisLow = DEFAULT_AXIS_LOW;
+  axisHigh = DEFAULT_AXIS_HIGH;
+  remember();
+  publish();
+}
+
+export function setAxisOctaves(value: number): void {
+  if (!Number.isFinite(value)) return;
+  axisOctaves = Math.min(5, Math.max(1, Math.round(value * 2) / 2));
+  remember();
+  publish();
+}
+
+function pitchBounds(): PitchSpan {
+  return { low: MIDI_LOW, high: viewMidiHigh(ranges(), a4) };
+}
+
+function latestMidi(now: number): number | null {
+  const cutoff = now - WINDOW_SECONDS;
+  for (let i = points.length - 1; i >= 0; i--) {
+    const point = points[i];
+    if (point.time < cutoff) break;
+    if (point.hz != null && point.hz > 0) return hzToMidi(point.hz, a4);
+  }
+  return null;
+}
+
+function visiblePitchSpan(now: number): PitchSpan | undefined {
+  const bounds = pitchBounds();
+  if (axisMode === "full") return undefined;
+  if (axisMode === "fixed") return clampFixedSpan(axisLow, axisHigh, bounds);
+  const target = followPitchSpan(followTarget, latestMidi(now), axisOctaves * 12, bounds);
+  const dt = followAt > 0 ? (performance.now() - followAt) / 1000 : 0;
+  followTarget = target;
+  followShown = easePitchSpan(followShown, target, dt);
+  followAt = performance.now();
+  return followShown;
 }
 
 export async function refreshMics(): Promise<void> {
@@ -659,6 +837,7 @@ export async function setMic(id: string): Promise<void> {
   if (engine.recording || id === micId) return;
   micId = id;
   engine.micId = id;
+  remember();
   if (engine.mode !== "mic") {
     publish();
     return;
@@ -721,8 +900,7 @@ export function saveCsv(): void {
   URL.revokeObjectURL(url);
 }
 
-engine.detector = "acf-basic";
-applyCeilings();
+restoreSettings();
 snapshot = build();
 engine.preloadModel();
 if (typeof navigator !== "undefined" && navigator.mediaDevices?.addEventListener) {

@@ -3,6 +3,7 @@ import * as Switch from "@radix-ui/react-switch";
 import { ChevronLeft, ChevronRight, Circle, Download, Mic, Play, Settings as SettingsIcon, Square, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from "react";
 import type { AudioFormat } from "../audio/encode";
+import { noteName } from "../audio/notes";
 import { SCALE_GROUPS } from "../scale";
 import type { DetectorId } from "../audio/engine";
 import {
@@ -16,6 +17,10 @@ import {
   removeSelected,
   saveCsv,
   setA4,
+  setAxisHigh,
+  setAxisLow,
+  setAxisMode,
+  setAxisOctaves,
   setCeiling,
   setDetector,
   setDistinguish,
@@ -23,6 +28,7 @@ import {
   setGuides,
   setPending,
   refreshMics,
+  resetFixedAxis,
   setMic,
   setScale,
   setView,
@@ -32,6 +38,9 @@ import {
   toggleMic,
   togglePlay,
   toggleRecord,
+  DEFAULT_AXIS_HIGH,
+  DEFAULT_AXIS_LOW,
+  type PitchAxisMode,
   type Snapshot,
   type ViewId,
 } from "../session";
@@ -49,15 +58,16 @@ const VIEWS: { id: ViewId; label: string }[] = [
 export function App() {
   const state = useSession();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="flex items-end justify-between gap-4 px-4 pt-3 pb-2">
+      <header className="flex items-end justify-between gap-3 px-3 pt-2 pb-2 sm:px-4 sm:pt-3">
         <div className="min-w-0">
           <p className="text-xs tracking-[0.14em] text-muted">ピッチ</p>
-          <div className="mt-1 flex min-w-0 items-baseline gap-4">
-            <p className={`truncate leading-none ${state.chord ? "text-3xl" : "text-5xl"}`}>{state.note}</p>
-            <p className="truncate text-sm text-muted">
+          <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-4 gap-y-1">
+            <p className={`truncate leading-none ${state.chord ? "text-2xl sm:text-3xl" : "text-4xl sm:text-5xl"}`}>{state.note}</p>
+            <p className="truncate text-xs text-muted sm:text-sm">
               {state.hz}
               <span className="px-1.5 text-ink/30">/</span>
               {state.cents}
@@ -68,7 +78,7 @@ export function App() {
           <Meter />
         </div>
         <div className="flex min-w-0 items-center gap-3">
-          <p className="line-clamp-2 text-right text-sm text-muted">{state.status}</p>
+          <p className="line-clamp-2 max-w-28 text-right text-xs text-muted sm:max-w-56 sm:text-sm">{state.status}</p>
           <IconButton label="設定" onClick={() => setSettingsOpen(true)}>
             <SettingsIcon />
           </IconButton>
@@ -77,10 +87,11 @@ export function App() {
 
       <div className="flex min-h-0 flex-1">
         <Stage view={state.view} />
-        <RecordingList state={state} />
+        <RecordingList state={state} open={libraryOpen} onClose={() => setLibraryOpen(false)} />
       </div>
 
-      <footer className="flex items-center gap-2 border-t border-line px-3 py-2">
+      <footer className="flex flex-col gap-2 border-t border-line px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:flex-row md:flex-wrap md:items-center">
+        <div className="flex min-w-0 items-center gap-2">
         <IconButton label={state.micLabel} disabled={state.micDisabled} live={state.mode === "mic" ? "accent" : undefined} onClick={() => void toggleMic()}>
           <Mic />
         </IconButton>
@@ -100,11 +111,13 @@ export function App() {
               key={item.id}
               type="button"
               role="tab"
+              aria-label={item.label}
+              title={item.label}
               aria-selected={state.view === item.id}
-              className={`h-9 rounded-full px-3 text-sm ${state.view === item.id ? "bg-ink text-panel" : "text-muted hover:text-ink"}`}
+              className={`inline-flex size-9 items-center justify-center rounded-full [&_svg]:size-5 ${state.view === item.id ? "bg-ink text-panel" : "text-muted hover:text-ink"}`}
               onClick={() => setView(item.id)}
             >
-              {item.label}
+              <ViewIcon id={item.id} />
             </button>
           ))}
         </div>
@@ -114,7 +127,7 @@ export function App() {
         </label>
         <select
           id="scale"
-          className="h-11 max-w-40 rounded-full border border-line bg-panel px-3 text-sm"
+          className="h-11 min-w-0 flex-1 rounded-full border border-line bg-panel px-3 text-sm md:max-w-40 md:flex-none"
           value={state.scaleId}
           onChange={(event) => setScale(event.target.value)}
         >
@@ -129,8 +142,14 @@ export function App() {
             </optgroup>
           ))}
         </select>
+        </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <PitchAxis state={state} />
+
+        <div className="flex flex-nowrap items-center gap-1.5 md:ml-auto md:gap-2">
+          <IconButton className="md:hidden" label={libraryOpen ? "録音一覧を閉じる" : "録音一覧"} pressed={libraryOpen} onClick={() => setLibraryOpen((open) => !open)}>
+            <LibraryIcon />
+          </IconButton>
           <IconButton label="前の録音" disabled={!state.canStep} onClick={() => stepRecording(-1)}>
             <ChevronLeft />
           </IconButton>
@@ -150,7 +169,7 @@ export function App() {
           </label>
           <select
             id="audio-format"
-            className="h-11 rounded-full border border-line bg-panel px-3 text-sm"
+            className="h-10 w-[4.5rem] rounded-full border border-line bg-panel px-2 text-sm md:h-11 md:w-auto md:px-3"
             value={state.format}
             onChange={(event) => setFormat(event.target.value as AudioFormat)}
           >
@@ -172,9 +191,159 @@ export function App() {
   );
 }
 
-function RecordingList({ state }: { state: Snapshot }) {
+const AXIS_MODES: { id: PitchAxisMode; label: string }[] = [
+  { id: "full", label: "全体" },
+  { id: "fixed", label: "固定" },
+  { id: "follow", label: "追従" },
+];
+
+function PitchAxis({ state }: { state: Snapshot }) {
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-l border-line" aria-label="保存した録音">
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="sr-only" htmlFor="pitch-axis">
+        音程の範囲
+      </label>
+      <select
+        id="pitch-axis"
+        className="h-11 rounded-full border border-line bg-panel px-3 text-sm"
+        value={state.axisMode}
+        onChange={(event) => setAxisMode(event.target.value as PitchAxisMode)}
+      >
+        {AXIS_MODES.map((item) => (
+          <option key={item.id} value={item.id}>
+            {item.label}
+          </option>
+        ))}
+      </select>
+      {state.axisMode === "fixed" && (
+        <>
+          <MidiBound id="axis-low" label="下限" value={state.axisLow} onCommit={setAxisLow} />
+          <MidiBound id="axis-high" label="上限" value={state.axisHigh} onCommit={setAxisHigh} />
+          <button
+            type="button"
+            className="h-11 rounded-full border border-line bg-panel px-3 text-sm hover:border-ink/40 disabled:cursor-default disabled:opacity-40"
+            disabled={state.axisLow === DEFAULT_AXIS_LOW && state.axisHigh === DEFAULT_AXIS_HIGH}
+            onClick={resetFixedAxis}
+          >
+            リセット
+          </button>
+        </>
+      )}
+      {state.axisMode === "follow" && <OctaveWidth value={state.axisOctaves} onCommit={setAxisOctaves} />}
+    </div>
+  );
+}
+
+const NOTE_GROUPS = Array.from({ length: 11 }, (_, index) => {
+  const octave = index - 1;
+  const notes = Array.from({ length: 12 }, (_, pitchClass) => (octave + 1) * 12 + pitchClass).filter((midi) => midi <= 127);
+  return { octave, notes };
+});
+
+function MidiBound({ id, label, value, onCommit }: { id: string; label: string; value: number; onCommit: (value: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const selected = String(Math.min(127, Math.max(0, Math.round(value))));
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex h-11 items-center gap-2 rounded-full border border-line bg-panel px-3 text-sm">
+        <span className="text-muted">{label}</span>
+        <input
+          id={id}
+          className="w-12 bg-transparent outline-none"
+          type="number"
+          min={0}
+          max={127}
+          step={1}
+          aria-label={`${label}のMIDI`}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => {
+            const next = Number(text);
+            if (!Number.isFinite(next)) {
+              setText(String(value));
+              return;
+            }
+            onCommit(next);
+          }}
+        />
+      </div>
+      <select
+        id={`${id}-note`}
+        className="h-11 rounded-full border border-line bg-panel px-3 text-base md:text-sm"
+        aria-label={`${label}の音名`}
+        value={selected}
+        onChange={(event) => onCommit(Number(event.target.value))}
+      >
+        {NOTE_GROUPS.map((group) => (
+          <optgroup key={group.octave} label={`${group.octave}オクターブ`}>
+            {group.notes.map((midi) => (
+              <option key={midi} value={String(midi)}>
+                {noteName(midi)}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function OctaveWidth({ value, onCommit }: { value: number; onCommit: (value: number) => void }) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  return (
+    <label className="flex h-11 items-center gap-2 rounded-full border border-line bg-panel px-3 text-sm" htmlFor="axis-octaves">
+      <span className="text-muted">幅</span>
+      <input
+        id="axis-octaves"
+        className="w-12 bg-transparent outline-none"
+        type="number"
+        min={1}
+        max={5}
+        step={0.5}
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => {
+          const next = Number(text);
+          if (!Number.isFinite(next)) {
+            setText(String(value));
+            return;
+          }
+          onCommit(next);
+        }}
+      />
+      <span className="text-muted">oct</span>
+    </label>
+  );
+}
+
+function RecordingList({ state, open, onClose }: { state: Snapshot; open: boolean; onClose: () => void }) {
+  return (
+    <>
+      <aside className="hidden w-60 shrink-0 flex-col border-l border-line md:flex" aria-label="保存した録音">
+        <RecordingEntries state={state} />
+      </aside>
+      {open ? (
+        <div className="fixed inset-0 z-30 md:hidden">
+          <button type="button" className="absolute inset-0 bg-black/55" aria-label="録音一覧を閉じる" onClick={onClose} />
+          <aside className="absolute inset-y-0 right-0 flex w-[min(20rem,88vw)] flex-col border-l border-line bg-bg" aria-label="保存した録音">
+            <div className="flex items-center justify-end px-2 pt-2">
+              <IconButton label="録音一覧を閉じる" onClick={onClose}>
+                <CloseIcon />
+              </IconButton>
+            </div>
+            <RecordingEntries state={state} />
+          </aside>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function RecordingEntries({ state }: { state: Snapshot }) {
+  return (
+    <>
       <h2 className="px-3 pt-3 pb-2 text-xs tracking-[0.14em] text-muted">録音</h2>
       {state.files.length === 0 ? (
         <p className="px-3 text-sm text-muted">録音はまだありません。録音を停止するとここに残ります。</p>
@@ -199,7 +368,58 @@ function RecordingList({ state }: { state: Snapshot }) {
           })}
         </ul>
       )}
-    </aside>
+    </>
+  );
+}
+
+function ViewIcon({ id }: { id: ViewId }) {
+  if (id === "ribbon") return <RibbonIcon />;
+  if (id === "loudness") return <LoudnessIcon />;
+  return <PitchIcon />;
+}
+
+function PitchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 18h18" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.35" />
+      <path d="M4 15.5c2.2-.6 3.2-7 5.4-7s1.6 4.2 3.8 4.2 2.6-6.2 5.6-7.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function RibbonIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 15.5c2.2-.6 3.2-7 5.4-7s1.6 4.2 3.8 4.2 2.6-6.2 5.6-7.2" fill="none" stroke="currentColor" strokeWidth="5.5" strokeLinecap="round" opacity="0.28" />
+      <path d="M4 15.5c2.2-.6 3.2-7 5.4-7s1.6 4.2 3.8 4.2 2.6-6.2 5.6-7.2" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LoudnessIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="7" cy="16" r="1.35" fill="currentColor" opacity="0.4" />
+      <circle cx="11" cy="11.5" r="1.7" fill="currentColor" opacity="0.7" />
+      <circle cx="15.5" cy="7.5" r="2.15" fill="currentColor" />
+      <circle cx="18.5" cy="14" r="1.25" fill="currentColor" opacity="0.5" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7l10 10M17 7L7 17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LibraryIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 7h14M5 12h14M5 17h9" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 
@@ -214,6 +434,7 @@ function IconButton({
   pressed,
   live,
   onClick,
+  className = "",
   children,
 }: {
   label: string;
@@ -221,6 +442,7 @@ function IconButton({
   pressed?: boolean;
   live?: "accent" | "record" | "play";
   onClick: () => void;
+  className?: string;
   children: ReactNode;
 }) {
   const tone =
@@ -234,7 +456,7 @@ function IconButton({
   return (
     <button
       type="button"
-      className={`inline-flex size-11 shrink-0 items-center justify-center rounded-full border disabled:cursor-default disabled:opacity-40 [&_svg]:size-5 ${tone}`}
+      className={`inline-flex size-10 shrink-0 items-center justify-center rounded-full border disabled:cursor-default disabled:opacity-40 md:size-11 [&_svg]:size-5 ${tone} ${className}`}
       aria-label={label}
       title={label}
       disabled={disabled}
@@ -324,7 +546,7 @@ function Settings({
             <div>
               <Dialog.Title className="text-lg">設定</Dialog.Title>
               <Dialog.Description className="mt-1 text-sm text-muted">
-                検出と、描画の切り替えです。音程の見方は画面下で選べます。
+                検出と、描画の切り替えです。音程の見方と範囲は画面下で選べます。
               </Dialog.Description>
             </div>
             <Dialog.Close className="h-9 rounded-full border border-line px-3 text-sm hover:border-ink/40">閉じる</Dialog.Close>

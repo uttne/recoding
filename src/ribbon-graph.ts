@@ -58,7 +58,7 @@ export class RibbonGraph {
       const color = pointColor(run.detector, run.provisional, distinguish);
       const plotted = densifyRibbon(run.vertices).map((vertex) => ({
         x: pitchTimeX(vertex.time, now, layout.plotLeft, layout.plotWidth),
-        y: pitchY(vertex.midi, layout.midiHigh, layout.plotTop, layout.plotHeight, true),
+        y: pitchY(vertex.midi, layout.midiLow, layout.midiHigh, layout.plotTop, layout.plotHeight, true),
         gain: vertex.gain,
       }));
       for (let layer = HALO_LAYERS; layer >= 1; layer--) {

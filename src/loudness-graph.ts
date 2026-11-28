@@ -27,6 +27,7 @@ function pixelRatio(): number {
 export class LoudnessGraph {
   private readonly ctx: CanvasRenderingContext2D;
   private a4 = 440;
+  private midiLow = MIDI_LOW;
   private midiHigh = MIDI_HIGH;
   private distinguish = true;
   private scale: ScaleChoice = { kind: "chromatic" };
@@ -54,7 +55,9 @@ export class LoudnessGraph {
     const guides = frame.style?.guides !== false;
     this.distinguish = frame.style?.distinguish !== false;
     this.scale = frame.style?.scale ?? { kind: "chromatic" };
-    this.midiHigh = viewMidiHigh(ranges, this.a4);
+    const requested = frame.style?.pitchSpan;
+    this.midiLow = requested && requested.high > requested.low ? requested.low : MIDI_LOW;
+    this.midiHigh = requested && requested.high > requested.low ? requested.high : viewMidiHigh(ranges, this.a4);
     const { ctx, canvas } = this;
     const width = canvas.width;
     const height = canvas.height;
@@ -110,8 +113,8 @@ export class LoudnessGraph {
   private drawPitchGrid(left: number, top: number, width: number, height: number, ratio: number): void {
     const { ctx } = this;
     const bottom = top + height;
-    for (let midi = MIDI_LOW; midi <= this.midiHigh; midi++) {
-      const x = loudnessX(midi, left, width, MIDI_LOW, this.midiHigh);
+    for (let midi = Math.ceil(this.midiLow); midi <= Math.floor(this.midiHigh); midi++) {
+      const x = loudnessX(midi, left, width, this.midiLow, this.midiHigh);
       const pitchClass = ((midi % 12) + 12) % 12;
       const labelAt = () => {
         ctx.textAlign = x < left + 18 * ratio ? "left" : x > left + width - 18 * ratio ? "right" : "center";
@@ -226,7 +229,7 @@ export class LoudnessGraph {
     ratio: number,
     style: { radius: number; alpha: number; ring?: boolean },
   ): void {
-    const x = loudnessX(hzToMidi(hz, this.a4), left, width, MIDI_LOW, this.midiHigh);
+    const x = loudnessX(hzToMidi(hz, this.a4), left, width, this.midiLow, this.midiHigh);
     const y = loudnessY(db, top, height);
     const { ctx } = this;
     ctx.save();
@@ -244,7 +247,7 @@ export class LoudnessGraph {
   }
 
   private xUnclamped(midi: number, left: number, width: number): number {
-    const span = this.midiHigh - MIDI_LOW;
-    return left + ((midi - MIDI_LOW) / span) * width;
+    const span = this.midiHigh - this.midiLow;
+    return left + ((midi - this.midiLow) / span) * width;
   }
 }

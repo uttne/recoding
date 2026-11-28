@@ -83,6 +83,8 @@ export type GraphStyle = {
   pending: boolean;
   /** Chord scale for the pitch grid. Omitted means every semitone. */
   scale?: ScaleChoice;
+  /** Visible MIDI range. Omitted means the full axis. */
+  pitchSpan?: { low: number; high: number };
 };
 
 export type GraphFrame = {
@@ -189,6 +191,7 @@ export type PitchTimeLayout = {
   plotTop: number;
   plotWidth: number;
   plotHeight: number;
+  midiLow: number;
   midiHigh: number;
 };
 
@@ -201,9 +204,9 @@ export function pitchTimeX(time: number, now: number, left: number, width: numbe
   return left + ((time - (now - WINDOW_SECONDS)) / WINDOW_SECONDS) * width;
 }
 
-export function pitchY(midi: number, midiHigh: number, top: number, height: number, clamp: boolean): number {
-  const span = midiHigh - MIDI_LOW;
-  const value = clamp ? Math.min(midiHigh, Math.max(MIDI_LOW, midi)) : midi;
+export function pitchY(midi: number, midiLow: number, midiHigh: number, top: number, height: number, clamp: boolean): number {
+  const span = midiHigh - midiLow;
+  const value = clamp ? Math.min(midiHigh, Math.max(midiLow, midi)) : midi;
   return top + ((midiHigh - value) / span) * height;
 }
 
@@ -220,7 +223,10 @@ export function paintPitchTimeAxes(
   const ranges = frame.ranges;
   const showGuides = frame.style?.guides !== false;
   const distinguish = frame.style?.distinguish !== false;
-  const midiHigh = viewMidiHigh(ranges, a4);
+  const fullHigh = viewMidiHigh(ranges, a4);
+  const requested = frame.style?.pitchSpan;
+  const midiLow = requested && requested.high > requested.low ? requested.low : MIDI_LOW;
+  const midiHigh = requested && requested.high > requested.low ? requested.high : fullHigh;
   const ratio = pitchPixelRatio();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, width, height);
@@ -232,15 +238,15 @@ export function paintPitchTimeAxes(
   const plotWidth = width - plotLeft - 12 * ratio;
   const plotTop = 16 * ratio;
   const plotHeight = height - 28 * ratio;
-  const yAt = (midi: number) => pitchY(midi, midiHigh, plotTop, plotHeight, true);
-  const yOpen = (midi: number) => pitchY(midi, midiHigh, plotTop, plotHeight, false);
+  const yAt = (midi: number) => pitchY(midi, midiLow, midiHigh, plotTop, plotHeight, true);
+  const yOpen = (midi: number) => pitchY(midi, midiLow, midiHigh, plotTop, plotHeight, false);
 
   ctx.font = `${12 * ratio}px "Segoe UI", "Yu Gothic UI", sans-serif`;
   ctx.textBaseline = "middle";
   ctx.lineWidth = 1;
 
   const scale = frame.style?.scale ?? { kind: "chromatic" as const };
-  for (let midi = MIDI_LOW; midi <= midiHigh; midi++) {
+  for (let midi = Math.ceil(midiLow); midi <= Math.floor(midiHigh); midi++) {
     const y = yAt(midi);
     const pitchClass = ((midi % 12) + 12) % 12;
     if (scale.kind === "chromatic") {
@@ -303,7 +309,7 @@ export function paintPitchTimeAxes(
     drawLimit(ctx, active.fmax, ranges.active, "上限", "right", plotLeft, plotTop, plotWidth, plotHeight, ratio, a4, yOpen, distinguish);
   }
 
-  return { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiHigh };
+  return { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiLow, midiHigh };
 }
 
 function drawLimit(
@@ -370,7 +376,7 @@ export class PitchGraph {
   draw(points: PitchPoint[], now: number, frame: GraphFrame = {}): void {
     const layout = paintPitchTimeAxes(this.ctx, this.canvas.width, this.canvas.height, now, this.a4, frame);
     const { ctx } = this;
-    const { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiHigh } = layout;
+    const { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiLow, midiHigh } = layout;
     ctx.lineWidth = 2.4 * ratio;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
@@ -379,12 +385,12 @@ export class PitchGraph {
       ctx.beginPath();
       ctx.strokeStyle = pointColor(voice.detector, voice.provisional, distinguish);
       const first = voice.points[0];
-      ctx.moveTo(pitchTimeX(first.time, now, plotLeft, plotWidth), pitchY(first.midi, midiHigh, plotTop, plotHeight, true));
+      ctx.moveTo(pitchTimeX(first.time, now, plotLeft, plotWidth), pitchY(first.midi, midiLow, midiHigh, plotTop, plotHeight, true));
       for (let i = 1; i < voice.points.length; i++) {
         const point = voice.points[i];
         ctx.lineTo(
           pitchTimeX(point.time, now, plotLeft, plotWidth),
-          pitchY(point.midi, midiHigh, plotTop, plotHeight, true),
+          pitchY(point.midi, midiLow, midiHigh, plotTop, plotHeight, true),
         );
       }
       ctx.stroke();
