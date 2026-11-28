@@ -192,6 +192,6 @@ Basic Pitch は単音の読み方だけを使います。モデルの読み込�
 1. `DetectorId` に識別子を足す。`src/audio/engine.ts` にあります。
 2. `onChunk` から新しい推定を呼び、選択中のときだけ `onPoint` する。無音は `hz: null` にします。
 3. `src/entities/pitch/model/graph.ts` の `COLOR` と `LIMIT_LABEL` に色と名前を足す。`GraphRanges.byDetector` にも範囲を足す。
-4. `src/entities/session/model/session.ts` の `DETECTORS` と、上限があるなら `CEILING_FIELDS` に choice を足す。値はそのまま `engine.detector` に入ります。
+4. `src/entities/session/model/session.ts` の `DETECTORS` と、上限があるなら `CEILING_FIELDS` に choice を足す。値はそのまま `engine.detector` に入ります。設定ダイアログ `src/widgets/settings/ui/settings-dialog.tsx` はこの配列を読むので、画面側に検出器名を直書きしません。
 5. モデルや WASM が増える場合は、`public` へ `.mjs` を置かず、`vite.config.ts` の配信方法に合わせます。詳細は [architecture.md](architecture.md) の「ONNX Runtime の置き場所」です。
 6. 式に数値の期待があるものは `src/audio/*.test.ts` に足し、`mise exec -- npm test` で通します。マイクを使ったテストはまだありません。

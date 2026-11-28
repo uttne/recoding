@@ -19,7 +19,7 @@
                       ├ StreamResampler → 16 kHz → CrepeStream → Worker
                       └ StreamResampler → 22050 Hz → BasicPitchStream → Worker
                            └ 選択中の検出器の点だけ onPoint
-                                └ session.ts の points[]
+                                └ entities/session/model/session.ts の points[]
                                      ├ requestAnimationFrame で PitchGraph.draw
                                      ├ 同じ点と、チャンクごとの RMS → LoudnessGraph.draw
                                      └ 同じ点と RMS → RibbonGraph.draw
@@ -61,26 +61,52 @@ Tiny-CREPE の点は、64 ms の窓の中心の時刻です。窓の後半が揃
 
 ## 検出器の選択
 
-`PitchEngine.detector` は `"acf2"`、`"acf-basic"`、`"mpm"`、`"pyin"`、`"swiftf0"`、`"crepe"`、`"basic-mono"`、`"basic-poly"` のいずれかです。初期値は `"acf2"` です。
+`PitchEngine.detector` は `"acf2"`、`"acf-basic"`、`"mpm"`、`"pyin"`、`"swiftf0"`、`"crepe"`、`"basic-mono"`、`"basic-poly"` のいずれかです。保存が無いときの画面の初期値は `"acf-basic"` です。`PitchEngine` のフィールドは `"acf2"` で始まり、`session.ts` を読み込んだときの `restoreSettings()` が、localStorage かこの初期値で上書きします。
 
 ACF2+、ACF2+→Basic、MPM は、選択中のときだけ 16 ms 以上間隔を空けて実行します。pYIN は選択中だけチャンクを渡します。外すとトラッカーを捨て、次に選んだときにマイクの今の時刻から作り直します。SwiftF0 はモデルの読み込みが終わるとストリームを作り、選択に関係なく 16 kHz の音声を流し続けます。推論は裏で進みますが、`onPoint` に載るのは選択中の検出器だけです。切り替えた直後から SwiftF0 の確定フレームが出るのは、この先行入力のためです。
 
 Tiny-CREPE と Basic Pitch のリサンプルは、マイクが開いているあいだ続けます。推論するのは、その検出器が選ばれてモデルの読み込みが終わったときだけです。Basic Pitch の単音と重音は同じ推論で、結果を返すときにどちらの読み方をするかが決まります。単音はコントゥアの尾根を直前の音程から追い、有音が続く数フレームの中央値で細かい揺れを取ります。ノート頭は、尾根の近くに音があるかの判定にだけ使います。重音は半音ごとの読み方のままです。ACF2+→Basic は単音の読み方だけを使い、`onRevise` で暫定点を置き換えます。`onPoint` には ACF2+ の暫定点だけが載り、大きな音名はそちらだけを更新します。
 
-SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始まります。Tiny-CREPE は、そのラジオを選んだときに始まります。Basic Pitch は、単音、重音、ACF2+→Basic のいずれかを選んだときに始まります。失敗すると各モデルがエラーを覚え、同じページでは再試行しません。信号処理の検出器はそのまま使えます。ACF2+→Basic は、モデルの読み込み前も右端を ACF2+ で描きます。
+SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始まります。Tiny-CREPE は、設定でそれを選んだときに始まります。Basic Pitch は、単音、重音、ACF2+→Basic のいずれかを選んだときに始まります。失敗すると各モデルがエラーを覚え、同じページでは再試行しません。信号処理の検出器はそのまま使えます。ACF2+→Basic は、モデルの読み込み前も右端を ACF2+ で描きます。
 
 停止時は MediaStream のトラックを止め、AudioContext を閉じ、SwiftF0 ストリームを `flush` します。`flush` は残り 176 ms 分のフレームも返します。Tiny-CREPE と Basic Pitch は、走っている推論の結果を捨てます。
 
+## 画面の層
+
+画面は Feature-Sliced Design です。上の層が下の層を import します。`shared` は `features` を知らず、`src/audio` は画面を知りません。
+
+| 層 | 場所 | 役割 |
+|---|---|---|
+| app | `src/app` | React の起点と、Tailwind の `@theme` |
+| pages | `src/pages/recorder` | ヘッダー、ステージ、録音一覧、フッターの組み立て |
+| widgets | `src/widgets` | ヘッダー、フッター、ステージ、設定ダイアログ、録音一覧 |
+| features | `src/features` | マイク、録音、再生、表示、スケール、音程の範囲、ダウンロード、一覧の開閉 |
+| entities | `src/entities` | セッション、録音ファイル、ピッチの計算と描画 |
+| shared | `src/shared` | ボタン、ダイアログ、Switch、Input。色は `@theme` のトークン |
+| audio | `src/audio` | 検出器と符号化。画面を層に分けたときもここは動かしていない |
+
+UI の import は `@/` です。`tsconfig.json` と `vite.config.ts` がこれを `src/` へ向けます。`session.ts` と `src/audio` は相対パスのままです。
+
+`src/entities/session/model/session.ts` は React を import しません。このモジュールを値として読むと `PitchEngine` が作られ、末尾の `restoreSettings()` が設定を戻し、SwiftF0 の `preloadModel()` が始まります。画面は `use-session.ts` の `useSessionSlice` で、スナップショットの必要な項目だけを購読します。音程の点が追加されても、その項目を購読していない部品は描き直しません。設定ダイアログを開いているあいだだけ、中のフォームがスナップショット全体を購読します。
+
+点、チャンクの RMS、追従の窓は React の state にも props にも載せません。`Stage` は時間、帯、大きさの 3 枚のキャンバスを常にマウントし、`mountStage` に渡します。`mountStage` が `requestAnimationFrame` で 3 つのグラフを描き、ステージの `ResizeObserver` で内部解像度を合わせます。表示中でないキャンバスは `invisible` です。ヘッダーの音量メーターは `bindMeter` が受け取った要素の `scaleX` を、点の購読とは別に動かします。
+
+操作は、見た目とセッションへの接続を分けます。`ViewTabs`、`ScaleSelect`、`PitchAxisControl`、`RecordingEntries` は値とコールバックだけを受けます。`ViewSwitch`、`ScaleControl`、`PitchAxis` が `useSessionSlice` と `set*` を渡します。Storybook は見た目の側を `src/**/*.stories.tsx` に置きます。ストーリーは `session.ts` を値として import しません。型だけの import はモジュールを実行しないので、録音ファイルの型は使えます。`npm run build` の `tsc` はストーリーを型チェックから外しています。Storybook の Vite は `ort-runtime` と `flac-wasm` を外し、開発サーバーの COOP / COEP ヘッダも付けません。
+
+`src/shared/ui` は shadcn/ui の形（`cva`、`cn`、Radix）で、Button、IconButton、Dialog、Switch、Input、Label を手で書いてあります。色は `src/app/styles/index.css` の `@theme` です。背景は `#14110e`、文字は `#f3ead7`、アクセントは `#e6a15c` です。shadcn のパッケージは依存に入っていません。`components.json` は部品の置き場所を示すだけで、CLI で部品を足すとこのトークンを上書きします。スケールと音名の一覧は、端末の `select` です。
+
 ## 画面が持っている状態
 
-`src/entities/session/model/session.ts` が次を持ちます。
+`src/entities/session/model/session.ts` が次を持ちます。React のコンポーネントは、このモジュールが `publish` したスナップショットを読むだけで、点の配列は持ちません。
 
 | 状態 | 場所 | 意味 |
 |---|---|---|
 | `points` | `session.ts` | 描画と CSV の元。エンジンは保持しません |
+| `levels` | `session.ts` | 直近約 9 秒の RMS。帯と大きさのグラフが読む |
 | `clock` | `session.ts` | 最新の音声時刻 |
-| `a4` | `session.ts` と `PitchGraph` | 基準周波数。エンジンの Hz は変えません |
-| `running` | `PitchEngine` | マイクが開いているか |
+| スナップショット | `session.ts` の `getSnapshot` | 音名、ボタンの文言、設定の現在値 |
+| `a4` | `session.ts` と各グラフ | 基準周波数。エンジンの Hz は変えません |
+| `running` | `PitchEngine` | マイクか再生が開いているか。`mode` は `idle`、`mic`、`file` |
 
 点は 20 万件を超えると、古い方から削って 18 万件にします。消去ボタンは配列を空にするだけで、エンジンのサンプルカウンタは戻しません。停止して再開しても `samples` は続きます。リングバッファだけ新しいものに替えます。
 
@@ -128,11 +154,15 @@ SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxrunt
 
 | やりたいこと | 触るファイル |
 |---|---|
-| 画面の配置、設定、操作 | `src/pages`、`src/widgets`、`src/features`、`src/entities/session/model/session.ts` |
+| 画面の配置 | `src/pages/recorder`、`src/widgets/header`、`footer`、`stage`、`library` |
+| 一つの操作の見た目 | `src/features/<名前>/ui` の、値とコールバックだけを受ける部品。Storybook もそこへ足す |
+| その操作とセッションの接続 | 同じ機能の薄い部品。`useSessionSlice` と `session.ts` の `set*` |
+| 共通のボタンやダイアログ | `src/shared/ui`。色は `src/app/styles/index.css` の `@theme` |
+| 音名やボタンの文言 | `src/entities/session/model/session.ts` のスナップショット |
 | 設定の保存 | `src/entities/session/model/preferences.ts` |
 | IndexedDB の録音ファイル | `src/entities/recording/model/recordings.ts` |
 | WAV、FLAC、MP3 | `src/audio/wav.ts`、`src/audio/encode.ts`、`src/audio/encode.worker.ts` |
-| 線の色、見える音域、何秒分描くか | `src/entities/pitch/model/graph.ts` |
+| 線の色、見える音域、何秒分描くか | `src/entities/pitch/model/graph.ts`。帯は `ribbon-graph.ts`、大きさは `loudness-graph.ts`、追従の窓は `pitch-axis.ts`。呼び出しは `session.ts` の `mountStage` |
 | マイクの制約、16 ms の間隔、再生 | `src/audio/engine.ts` |
 | ACF2+ の式やしきい値 | `src/audio/acf2.ts` と `src/audio/acf2.test.ts` |
 | ACF2+→Basic の置き換え | `src/audio/acf-basic.ts` と `src/audio/acf-basic.test.ts` |

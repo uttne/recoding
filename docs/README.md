@@ -9,7 +9,7 @@
 - Windows 上で開発している想定です。コマンドは PowerShell です。
 - Node.js は mise で入れます。バージョンはリポジトリ直下の `mise.toml` が `node = "22"` と指定しています。
 - マイクが使えること。ページは `http://localhost` で開けばマイク許可を求められます。
-- パッケージマネージャは npm です。`package-lock.json` を使います。
+- 依存のインストールは npm で、`package-lock.json` を使います。`mise.toml` は pnpm もツールに入れていますが、Storybook を含むいまの依存は `package-lock.json` に固定されています。
 
 ## 最初の起動
 
@@ -21,7 +21,7 @@ mise exec -- npm install
 mise exec -- npm run dev
 ```
 
-Vite が `http://localhost:5173/` を表示します。ポートが使用中なら、表示された別ポートを開きます。ブラウザで「マイクを開始」を押し、許可したあと声や単音を入れると線が右端から左へ流れます。画面は React と Tailwind CSS で、設定ダイアログは Radix の Dialog と Switch です。
+Vite が `http://localhost:5173/` を表示します。ポートが使用中なら、表示された別ポートを開きます。ブラウザで「マイクを開始」を押し、許可したあと声や単音を入れると線が右端から左へ流れます。画面は React と Tailwind CSS です。ボタンと設定ダイアログは `src/shared/ui` にあり、Dialog と Switch は Radix です。部品の見た目は Storybook で確認します。
 
 mise をシェルに有効化している場合は `mise exec --` を外して `npm run dev` でも同じです。有効化していないシェルで `npm` だけ打つと、別の Node を掴むことがあります。
 
@@ -54,32 +54,44 @@ mise をシェルに有効化している場合は `mise exec --` を外して `
 - 「ダウンロード」は、選んだ録音を WAV、FLAC、MP3 のいずれかで保存します。WAV と FLAC は 16 bit のロスレスです。MP3 は 192 kbps です。FLAC は [libflacjs](https://github.com/mmig/libflac.js)（MIT、中身は BSD の libFLAC）、MP3 は [@breezystack/lamejs](https://github.com/shijinyu/lamejs)（LGPL-3.0 の LAME 移植）です。WAV はこのリポジトリで書いています。変換中も画面が止まらないよう、FLAC と MP3 は Worker で符号化します。
 - 点は最大約 20 万件まで保持し、超えると古い方から削って約 18 万件に戻します。
 
+## コードの分け方
+
+画面は Feature-Sliced Design の層に分かれています。`src/pages/recorder` がヘッダー、ステージ、録音一覧、フッターを組み立て、操作は `src/features`、枠は `src/widgets`、セッションと描画は `src/entities`、ボタンやダイアログは `src/shared/ui` です。検出器は `src/audio` のままです。
+
+ピッチの点、音量、追従の窓は React の state に載せず、`requestAnimationFrame` で描きます。ボタンは `useSessionSlice` で自分の項目だけを購読します。見た目だけの部品は Storybook に置き、ストーリーから `session.ts` を値として import しません。層の向きと、描画を React から離す理由は [architecture.md](architecture.md) の「画面の層」です。
+
 ## ディレクトリ
 
 ```text
-mise.toml                 Node 22 の指定
+mise.toml                 Node 22 の指定。pnpm もツールとして入る
 package.json              npm scripts と依存
-vite.config.ts            開発サーバーのヘッダと ONNX Runtime の配信
-index.html                画面の起点
+package-lock.json         いまの依存を固定するロックファイル
+vite.config.ts            @ エイリアス、開発サーバーのヘッダ、ONNX Runtime と FLAC wasm の配信
+index.html                画面の起点。script は /src/app/main.tsx
+components.json           shared/ui の置き場所。部品そのものは手で書いてある
+.storybook/               部品の確認。アプリの配信ヘッダと ONNX 用プラグインは外す
 public/capture-worklet.js マイク波形を 512 サンプルずつメインへ渡す
 public/models/swift-f0.onnx
 public/models/crepe-tiny.onnx
 public/models/nmp.onnx
 public/models/LICENSE-*.txt
-src/app/main.tsx          React の起点
-src/pages/recorder        画面の組み立て
-src/widgets               ヘッダー、フッター、ステージ、設定、録音一覧
-src/features              マイク、録音、再生、スケール、音程の範囲
-src/entities/session      マイク、録音、再生、描画ループ
-src/entities/session/model/preferences.ts  設定の localStorage
-src/entities/recording    IndexedDB の録音ファイル
+src/app/main.tsx          React の起点。RecorderPage を描く
+src/app/styles/index.css  Tailwind と @theme の色
+src/pages/recorder/ui     一画面の組み立て
+src/widgets               header、footer、stage、settings、library
+src/features              microphone、record、playback、view、scale、pitch-axis、download、recording-library
+src/shared/ui             Button、IconButton、Dialog、Switch、Input、Label
+src/shared/lib            cn と、録音の長さの表示
+src/entities/session/model/session.ts       マイク、録音、再生、描画ループ、スナップショット
+src/entities/session/model/use-session.ts   スナップショットの購読
+src/entities/session/model/preferences.ts   設定の localStorage
+src/entities/recording/model                IndexedDB の録音ファイル
+src/entities/pitch/model                    ピッチ、帯、大きさ、スケール、音程の範囲。描画は requestAnimationFrame
 src/audio/pcm.ts          Float32 と 16 bit PCM
 src/audio/wav.ts          WAV の読み書き
 src/audio/encode.ts       FLAC と MP3
 src/audio/encode.worker.ts 変換をメインスレッドの外で行う
 src/audio/download.ts     形式を選んでファイルを作る
-src/entities/pitch/model  ピッチ、帯、大きさ、スケール、音程の範囲。描画は requestAnimationFrame のまま
-src/app/styles/index.css  Tailwind と画面の色
 src/audio/engine.ts       マイク、保存した録音の再生、検出器の選択、時刻
 src/audio/acf2.ts         ACF2+
 src/audio/acf-basic.ts    ACF2+ の暫定点を Basic Pitch で置き換える
