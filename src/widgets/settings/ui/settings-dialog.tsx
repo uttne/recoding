@@ -10,6 +10,7 @@ import {
   setDetector,
   setDistinguish,
   setGuides,
+  setLevelFloor,
   setMic,
   setPending,
 } from "@/entities/session/model/session";
@@ -31,6 +32,7 @@ function SettingsFormConnection() {
   const recording = useSessionSlice((state) => state.recording);
   const detector = useSessionSlice((state) => state.detector);
   const a4 = useSessionSlice((state) => state.a4);
+  const levelFloor = useSessionSlice((state) => state.levelFloor);
   const acf2 = useSessionSlice((state) => state.ceilings.acf2);
   const swiftf0 = useSessionSlice((state) => state.ceilings.swiftf0);
   const mpm = useSessionSlice((state) => state.ceilings.mpm);
@@ -52,6 +54,7 @@ function SettingsFormConnection() {
       detector={detector}
       detectors={DETECTORS}
       a4={a4}
+      levelFloor={levelFloor}
       ceilings={{
         acf2,
         swiftf0,
@@ -68,6 +71,7 @@ function SettingsFormConnection() {
       onMic={(id) => void setMic(id)}
       onDetector={setDetector}
       onA4={setA4}
+      onLevelFloor={setLevelFloor}
       onCeiling={setCeiling}
       onDistinguish={setDistinguish}
       onPending={setPending}

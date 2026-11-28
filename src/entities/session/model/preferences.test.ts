@@ -5,6 +5,7 @@ const defaults: Settings = {
   format: "wav",
   detector: "acf-basic",
   a4: 440,
+  levelFloor: -40,
   ceilings: { acf2: 2000, swiftf0: 2000, mpm: 2000, pyin: 2000, crepe: 2000, "basic-mono": 2000 },
   view: "pitch",
   distinguish: false,
@@ -40,6 +41,7 @@ describe("settings storage", () => {
       format: "flac",
       detector: "crepe",
       a4: 442,
+      levelFloor: -28,
       ceilings: { ...defaults.ceilings, acf2: 1500, crepe: 800 },
       view: "ribbon",
       distinguish: true,
@@ -62,6 +64,7 @@ describe("settings storage", () => {
         detector: "nope",
         format: "mp3",
         a4: 10,
+        levelFloor: 12,
         view: "loudness",
         ceilings: { acf2: 9000, mpm: 500, crepe: "high" },
         scaleId: "not-a-scale",
@@ -77,6 +80,7 @@ describe("settings storage", () => {
     expect(next.detector).toBe("acf-basic");
     expect(next.format).toBe("mp3");
     expect(next.a4).toBe(440);
+    expect(next.levelFloor).toBe(-40);
     expect(next.view).toBe("loudness");
     expect(next.ceilings.acf2).toBe(2000);
     expect(next.ceilings.mpm).toBe(500);
@@ -87,6 +91,16 @@ describe("settings storage", () => {
     expect(next.axisOctaves).toBe(5);
     expect(next.micId).toBe("mic-b");
     expect(next.distinguish).toBe(false);
+  });
+
+  it("keeps a level floor at either end and restores only that field when it is broken", () => {
+    expect(normalizeSettings({ levelFloor: -60 }, defaults).levelFloor).toBe(-60);
+    expect(normalizeSettings({ levelFloor: 0 }, defaults).levelFloor).toBe(0);
+    const next = normalizeSettings({ levelFloor: -61, format: "flac", detector: "mpm" }, defaults);
+    expect(next.levelFloor).toBe(-40);
+    expect(next.format).toBe("flac");
+    expect(next.detector).toBe("mpm");
+    expect(normalizeSettings({ levelFloor: "loud" }, defaults).levelFloor).toBe(-40);
   });
 
   it("uses the defaults when the stored text is not JSON", () => {

@@ -1,6 +1,7 @@
 import type { AudioFormat } from "../../../audio/encode";
 import { PitchEngine, type DetectorId, type MicChoice, type PitchPoint } from "../../../audio/engine";
 import { centsOff, hzToMidi, noteName } from "../../../audio/notes";
+import { droppedByLevel } from "../../pitch/model/loudness";
 import type { RecordingFile } from "../../recording/model/recordings";
 import type { PitchAxisMode } from "../../pitch/model/pitch-axis";
 import {
@@ -26,6 +27,7 @@ import {
   getDistinguish,
   getFormat,
   getGuides,
+  getLevelFloor,
   getMicId,
   getMics,
   getPending,
@@ -33,8 +35,9 @@ import {
   getView,
   refreshMics,
   restoreSettings,
+  setLevelFloor as storeLevelFloor,
 } from "./settings";
-import { clearGraphPoints, graphPoints, pointCount, pushLevel, pushPoint, revisePoints } from "./stage";
+import { clearGraphPoints, graphPoints, pitchLevelDb, pointCount, pushLevel, pushPoint, revisePoints } from "./stage";
 import type { CeilingId, ViewId } from "./preferences";
 
 export type { PitchAxisMode };
@@ -76,6 +79,7 @@ export type Snapshot = {
   format: AudioFormat;
   detector: DetectorId;
   a4: number;
+  levelFloor: number;
   ceilings: Record<CeilingId, number>;
   view: ViewId;
   distinguish: boolean;
@@ -123,6 +127,7 @@ let clock = 0;
 let engagedAt = 0;
 let armingMic = false;
 let armingRecord = false;
+let lastPoint: PitchPoint | null = null;
 let note = "–";
 let hzLabel = "— Hz";
 let centsLabel = "— cent";
@@ -164,6 +169,7 @@ function build(): Snapshot {
     format: getFormat(),
     detector: engine.detector,
     a4: getA4(),
+    levelFloor: getLevelFloor(),
     ceilings: ceilingChoices(),
     view: getView(),
     distinguish: getDistinguish(),
@@ -187,11 +193,17 @@ function publish(): void {
 }
 
 function resetReadout(): void {
+  lastPoint = null;
   chord = false;
   note = "–";
   hzLabel = "— Hz";
   centsLabel = "— cent";
   confidenceLabel = "—";
+}
+
+function present(point: PitchPoint): PitchPoint {
+  if (!droppedByLevel(point, pitchLevelDb(point), getLevelFloor())) return point;
+  return { time: point.time, hz: null, confidence: point.confidence, detector: point.detector };
 }
 
 function updateReadout(point: PitchPoint): void {
@@ -220,7 +232,8 @@ function updateReadout(point: PitchPoint): void {
 const engine = new PitchEngine({
   onPoint(point) {
     pushPoint(point);
-    updateReadout(point);
+    lastPoint = point;
+    updateReadout(present(point));
     publish();
   },
   onRevise(frames) {
@@ -305,9 +318,17 @@ export function clearGraph(): void {
   publish();
 }
 
+export function setLevelFloor(next: number): void {
+  if (!storeLevelFloor(next)) return;
+  if (lastPoint) updateReadout(present(lastPoint));
+  publish();
+}
+
 export function saveCsv(): void {
   const lines = ["time_s,detector,pitch_hz,midi,note,confidence,voiced"];
+  const floor = getLevelFloor();
   for (const point of graphPoints()) {
+    if (droppedByLevel(point, pitchLevelDb(point), floor)) continue;
     const events = point.pitches?.length
       ? point.pitches
       : point.hz == null

@@ -50,7 +50,10 @@ export class RibbonGraph {
     const distinguish = frame.style?.distinguish !== false;
     const layout = paintPitchTimeAxes(this.ctx, this.canvas.width, this.canvas.height, now, this.a4, frame);
     const { ctx } = this;
-    const runs = ribbonRuns(points, levels, now, this.a4, { splitProvisional: distinguish });
+    const runs = ribbonRuns(points, levels, now, this.a4, {
+      splitProvisional: distinguish,
+      levelFloor: frame.levelFloor,
+    });
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     ctx.setLineDash([]);

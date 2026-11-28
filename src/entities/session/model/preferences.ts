@@ -6,11 +6,19 @@ import { scaleChoiceFromId, scaleChoiceId } from "../../pitch/model/scale";
 export type CeilingId = Exclude<DetectorId, "acf-basic" | "basic-poly">;
 export type ViewId = "pitch" | "ribbon" | "loudness";
 
+/** Chunks quieter than this dBFS are not drawn. The ends are included. */
+export const LEVEL_FLOOR_MIN = -60;
+export const LEVEL_FLOOR_MAX = 0;
+/** Room noise and other small sounds stay off the pitch line until the control is lowered. */
+export const DEFAULT_LEVEL_FLOOR = -40;
+
 /** Choices that should look the same the next time this browser opens the app. */
 export type Settings = {
   format: AudioFormat;
   detector: DetectorId;
   a4: number;
+  /** dBFS. A chunk quieter than this does not become a pitch point. */
+  levelFloor: number;
   ceilings: Record<CeilingId, number>;
   view: ViewId;
   distinguish: boolean;
@@ -94,6 +102,7 @@ export function normalizeSettings(raw: unknown, defaults: Settings): Settings {
     format: oneOf(source.format, FORMATS, defaults.format),
     detector: oneOf(source.detector, DETECTORS, defaults.detector),
     a4: ranged(source.a4, 415, 466, defaults.a4),
+    levelFloor: ranged(source.levelFloor, LEVEL_FLOOR_MIN, LEVEL_FLOOR_MAX, defaults.levelFloor),
     ceilings,
     view: oneOf(source.view, VIEWS, defaults.view),
     distinguish: flag(source.distinguish, defaults.distinguish),

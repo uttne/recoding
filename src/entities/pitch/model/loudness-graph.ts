@@ -86,7 +86,7 @@ export class LoudnessGraph {
       this.drawLimit(active.fmax, ranges.active, "上限", "right", plotLeft, plotTop, plotWidth, plotHeight, ratio);
     }
 
-    const marks = loudnessMarks(points, levels, now, WINDOW_SECONDS);
+    const marks = loudnessMarks(points, levels, now, WINDOW_SECONDS, frame.levelFloor);
     const newest = marks.length === 0 ? null : marks[marks.length - 1].time;
     const live = newest != null && now - newest <= 0.35;
     for (const mark of marks) {

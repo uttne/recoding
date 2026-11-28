@@ -1,5 +1,5 @@
 import type { DetectorId } from "@/audio/engine";
-import type { CeilingId } from "@/entities/session/model/preferences";
+import { LEVEL_FLOOR_MAX, LEVEL_FLOOR_MIN, type CeilingId } from "@/entities/session/model/preferences";
 import { Button } from "@/shared/ui/button";
 import { DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog";
 import { NumberField } from "@/shared/ui/number-field";
@@ -13,6 +13,7 @@ export function SettingsForm({
   detector,
   detectors,
   a4,
+  levelFloor,
   ceilings,
   ceilingFields,
   distinguish,
@@ -22,6 +23,7 @@ export function SettingsForm({
   onMic,
   onDetector,
   onA4,
+  onLevelFloor,
   onCeiling,
   onDistinguish,
   onPending,
@@ -35,6 +37,7 @@ export function SettingsForm({
   detector: DetectorId;
   detectors: readonly { id: DetectorId; label: string }[];
   a4: number;
+  levelFloor: number;
   ceilings: Readonly<Record<CeilingId, number>>;
   ceilingFields: readonly { id: CeilingId; label: string; min: number; max: number }[];
   distinguish: boolean;
@@ -44,6 +47,7 @@ export function SettingsForm({
   onMic: (id: string) => void;
   onDetector: (id: DetectorId) => void;
   onA4: (value: number) => void;
+  onLevelFloor: (value: number) => void;
   onCeiling: (id: CeilingId, value: number) => void;
   onDistinguish: (value: boolean) => void;
   onPending: (value: boolean) => void;
@@ -90,6 +94,13 @@ export function SettingsForm({
           <span className="mt-1 flex h-11 items-center rounded-xl border border-line bg-panel px-3">
             <NumberField min={415} max={466} value={a4} onCommit={onA4} />
             <span className="text-muted">Hz</span>
+          </span>
+        </label>
+        <label className="block text-sm sm:col-span-2">
+          <span className="text-muted">これ未満は出さない</span>
+          <span className="mt-1 flex h-11 items-center rounded-xl border border-line bg-panel px-3">
+            <NumberField min={LEVEL_FLOOR_MIN} max={LEVEL_FLOOR_MAX} value={levelFloor} onCommit={onLevelFloor} />
+            <span className="text-muted">dBFS</span>
           </span>
         </label>
       </div>

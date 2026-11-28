@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { PitchPoint } from "../../../audio/engine";
 import { LoudnessGraph } from "./loudness-graph";
-import { levelNear, loudnessMarks, loudnessX, loudnessY, rmsToDb, type LevelSample } from "./loudness";
+import { droppedByLevel, keepsLevel, levelDbAt, levelNear, loudnessMarks, loudnessX, loudnessY, rmsToDb, type LevelSample } from "./loudness";
 
 function point(partial: Partial<PitchPoint> & Pick<PitchPoint, "time" | "hz">): PitchPoint {
   return {
@@ -87,6 +87,55 @@ describe("loudnessMarks", () => {
   it("drops levels quieter than -60 dBFS", () => {
     const marks = loudnessMarks([point({ time: 1, hz: 440 })], [{ time: 1, rms: 0.0005 }], 1, 8);
     expect(marks).toEqual([]);
+  });
+
+  it("drops a pitch under the floor and keeps one at it", () => {
+    const marks = loudnessMarks(
+      [point({ time: 1, hz: 440 }), point({ time: 1.02, hz: 466 })],
+      [
+        { time: 1, rms: 10 ** (-40 / 20) },
+        { time: 1.02, rms: 10 ** (-50 / 20) },
+      ],
+      1.02,
+      8,
+      -40,
+    );
+    expect(marks.map((mark) => mark.hz)).toEqual([440]);
+  });
+
+  it("drops every note of a chord when the chunk is under the floor", () => {
+    const marks = loudnessMarks(
+      [
+        point({
+          time: 1,
+          hz: 440,
+          detector: "basic-poly",
+          pitches: [
+            { hz: 440, confidence: 0.9 },
+            { hz: 554, confidence: 0.4 },
+          ],
+        }),
+      ],
+      [{ time: 1, rms: 10 ** (-50 / 20) }],
+      1,
+      8,
+      -40,
+    );
+    expect(marks).toEqual([]);
+  });
+});
+
+describe("level gate", () => {
+  it("keeps the floor and drops a missing or quieter level", () => {
+    expect(keepsLevel(-40, -40)).toBe(true);
+    expect(keepsLevel(-39.9, -40)).toBe(true);
+    expect(keepsLevel(-40.1, -40)).toBe(false);
+    expect(keepsLevel(null, -40)).toBe(false);
+    expect(levelDbAt([{ time: 1, rms: 0.1 }], 1)).toBeCloseTo(-20, 5);
+    const voiced = point({ time: 1, hz: 440, confidence: 0.99 });
+    expect(droppedByLevel(voiced, -50, -40)).toBe(true);
+    expect(droppedByLevel(voiced, -20, undefined)).toBe(false);
+    expect(droppedByLevel(point({ time: 1, hz: null }), -50, -40)).toBe(false);
   });
 });
 
