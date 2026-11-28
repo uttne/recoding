@@ -62,8 +62,6 @@ export type Snapshot = {
   files: readonly RecordingFile[];
   selectedId: string | null;
   playingId: string | null;
-  selectedName: string;
-  selectedLength: string;
   canStep: boolean;
   downloading: boolean;
   downloadDisabled: boolean;
@@ -153,20 +151,10 @@ let meter: HTMLElement | null = null;
 
 const listeners = new Set<() => void>();
 
-function formatDuration(frames: number, sampleRate: number): string {
-  const total = Math.max(0, Math.round(frames / Math.max(1, sampleRate)));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-
-function selectedFile(): RecordingFile | undefined {
-  return files.find((file) => file.id === selectedId);
-}
-
 function build(): Snapshot {
   const playing = engine.mode === "file";
   const recording = engine.recording;
   const busy = storing || armingMic || armingRecord;
-  const selected = selectedFile();
   return {
     status: statusText,
     note,
@@ -185,8 +173,6 @@ function build(): Snapshot {
     files,
     selectedId,
     playingId: playing ? playingId : null,
-    selectedName: selected?.name ?? "録音はまだありません",
-    selectedLength: selected ? formatDuration(selected.frames, selected.sampleRate) : "",
     canStep: files.length > 1,
     downloading,
     downloadDisabled: downloading || selectedId == null,
@@ -235,8 +221,6 @@ let snapshot: Snapshot = {
   files: [] as readonly RecordingFile[],
   selectedId: null,
   playingId: null,
-  selectedName: "録音はまだありません",
-  selectedLength: "",
   canStep: false,
   downloading: false,
   downloadDisabled: true,
