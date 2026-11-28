@@ -1,4 +1,4 @@
-import type { ViewId } from "@/entities/session/model/session";
+import type { ViewId } from "@/entities/session/model/preferences";
 import { ViewIcon } from "@/shared/ui/icons";
 
 export const VIEWS: { id: ViewId; label: string }[] = [

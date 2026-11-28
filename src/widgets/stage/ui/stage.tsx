@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, type RefObject } from "react";
-import { mountStage, type ViewId } from "@/entities/session/model/session";
+import { mountStage } from "@/entities/session/model/session";
+import type { ViewId } from "@/entities/session/model/preferences";
 
 export const Stage = memo(function Stage({ view }: { view: ViewId }) {
   const rootRef = useRef<HTMLDivElement>(null);
