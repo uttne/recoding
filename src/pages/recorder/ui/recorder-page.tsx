@@ -27,22 +27,24 @@ export function RecorderPage() {
         <RecordingPanel open={libraryOpen} onClose={() => setLibraryOpen(false)} />
       </div>
       <Footer
-        leading={
+        primary={
           <>
             <MicButton />
             <RecordButton />
             <ViewSwitch />
-            <ScaleControl />
           </>
         }
-        axis={<PitchAxis />}
-        trailing={
+        secondary={
           <>
-            <LibraryToggle open={libraryOpen} onToggle={() => setLibraryOpen((open) => !open)} />
-            <PlaybackControls />
-            <FormatSelect />
-            <DownloadButton />
-            <DeleteButton />
+            <ScaleControl />
+            <PitchAxis />
+            <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
+              <LibraryToggle open={libraryOpen} onToggle={() => setLibraryOpen((open) => !open)} />
+              <PlaybackControls />
+              <FormatSelect />
+              <DownloadButton />
+              <DeleteButton />
+            </div>
           </>
         }
       />
