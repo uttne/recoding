@@ -2,11 +2,11 @@
 
 人間は親エージェントとだけ話す。親は実装を自分で抱えず、Orca の子 worktree と子エージェントに渡す。コマンドは Orca 1.4.280 の `orca`（`orca.exe`）で確認したもの。
 
-このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。データベースは無い。環境の入れ方、依存のインストール、テスト、ビルドは `docs/development.md` だけに従う。そこに無いコマンドを作らない。子のプロンプトに書くテストも、その文書の `mise exec -- npm test` である。
+このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。データベースは無い。環境の入れ方、依存のインストール、テスト、ビルドは `docs/development.md` だけに従う。そこに無いコマンドを作らない。子のプロンプトに書くテストも、その文書の `mise exec -- npm test` である。実装後のレビューは `docs/review/common-criteria.md` と `docs/review/project-criteria.md`、人間への報告は `docs/review/report-format.md` に従う。手順は「4. レビューおよび報告ルール」である。
 
 ## 1. 役割分担
 
-親は作業を、変更ファイルがほとんど重ならない単位に分ける。1 単位が 1 つの GitHub Issue になる。番号の読み方と起票は「5. GitHub Issue 連携」に従う。
+親は作業を、変更ファイルがほとんど重ならない単位に分ける。1 単位が 1 つの GitHub Issue になる。番号の読み方と起票は「6. GitHub Issue 連携」に従う。
 
 親が自分で行うのは、分割、Issue の起票、子の起動、結果の確認、作業ブランチの push、PR の作成、人間への報告までである。子のプロンプトには、Issue のタイトル・本文・受け入れ条件、触ってよいパス、完了時に `docs/development.md` のテストコマンドを実行することを書く。
 
@@ -14,7 +14,7 @@
 
 使うエージェントは `orca agent installed --json` の `default: true` とする。人間が名前を指定したときはその id にする。
 
-サブタスクごとに、現在のワークスペースの子として worktree を作る。先に「5. GitHub Issue 連携」で Issue 番号とブランチ名を決める。Git の起点はリポジトリの既定ベース（`main`）なので、`--base-branch` は付けない。画面を子へ切り替えないので、`--activate` と `--run-hooks` は付けない。`--branch` にブランチ名、`--issue` に Issue 番号を渡す。`--setup run` で `orca.yaml` のセットアップを走らせる。そのコマンドは `docs/development.md` の依存インストールと同じ `mise exec -- npm ci` である。
+サブタスクごとに、現在のワークスペースの子として worktree を作る。先に「6. GitHub Issue 連携」で Issue 番号とブランチ名を決める。Git の起点はリポジトリの既定ベース（`main`）なので、`--base-branch` は付けない。画面を子へ切り替えないので、`--activate` と `--run-hooks` は付けない。`--branch` にブランチ名、`--issue` に Issue 番号を渡す。`--setup run` で `orca.yaml` のセットアップを走らせる。そのコマンドは `docs/development.md` の依存インストールと同じ `mise exec -- npm ci` である。
 
 Issue の実装に `orca orchestration worker-start`、`task-create`、`run-create`、`dispatch` は使わない。これらには `--branch` と `--issue` が無く、起動結果のハンドルもこの手順の待ち方と合わない。`worker-start` が失敗したあとの `--retry-of` でも、同じ起動を繰り返さない。
 
@@ -54,11 +54,26 @@ orca agent read <session-id> --json
 
 ## 3. 結果の集約と安全ガード
 
-子のパスは `worktree create --json` の id と path から取る。親はそこで `git status`、`git diff`、`mise exec -- npm test` を見てから、「5. GitHub Issue 連携」の手順で作業ブランチを push し、PR を作る。
+子のパスは `worktree create --json` の id と path から取る。親はそこで `git status`、`git diff`、`docs/development.md` のテストを見てから、「4. レビューおよび報告ルール」を行う。レビューを通過したあと、「6. GitHub Issue 連携」の手順で作業ブランチを push し、PR を作る。
 
 親は `gh pr merge` を実行しない。`main` への push と `main` へのマージは、人間の承認があってから行う。PR の URL、変更概要、テスト結果を人間に渡し、レビューとマージの判断は人間が行う。
 
-## 4. 後片付け
+## 4. レビューおよび報告ルール
+
+子エージェントの実装完了後、PR 作成および人間への報告を行う際は、以下の 2 フェーズを厳守すること。
+
+1. **レビュー実行フェーズ**
+   - 実装した子エージェント自身によるセルフレビューは禁止。親エージェント（または別セッション）が検証を行う。
+   - 必ず `docs/review/common-criteria.md` と `docs/review/project-criteria.md` の両方を読み込んで判定する（競合時は `project-criteria.md` を優先）。
+   - `Must` の指摘がある場合は子エージェントへ差し戻す（最大 2 回まで）。2 回で解消しない場合は人間へエスカレーションする。
+2. **PR 作成・人間への報告フェーズ**
+   - レビュー通過後（またはエスカレーション時）、必ず `docs/review/report-format.md` のルールとテンプレートに従ってレポートを出力する。
+   - UI 変更時はスクリーンショット、構造変更時は Mermaid 図を添付する。
+   - **自動マージ（`gh pr merge` 等）は禁止。** PR の URL とレポートを提示し、最終判断を人間に委ねる。
+
+差し戻しは、子の worktree へ `orca orchestration send` で送る。`terminal send` で子の入力へ打ち込まない。指摘には対象ファイル、行番号、問題点、期待する修正方針を書く。
+
+## 5. 後片付け
 
 報告が済み、その子が不要になってから削除する。セレクタは作成時の `id:<repoId>::<path>` を使う。`current` と `active` では削除できない。
 
@@ -68,9 +83,9 @@ orca worktree rm --worktree "id:<repoId>::<path>" --json
 
 削除が拒否されたときだけ `--force` を付ける。ローカルブランチは残る。人間がブランチも捨てると言ったときだけ `--delete-branch` を付ける。未マージの変更は Orca がブランチを残すので、結果を人間に伝える。
 
-## 5. GitHub Issue 連携
+## 6. GitHub Issue 連携
 
-リモートは `uttne/recoding`、既定ブランチは `main` である。`.github/ISSUE_TEMPLATE/` と `.github/pull_request_template.md` は無い。本文は下の見出しで書く。テンプレートが増えたら、その見出しを満たしたうえで `Closes #<番号>`、変更点、テスト結果を残す。`gh` は対話プロンプトを出さないよう、本文はファイルに書いて `--body-file` で渡す。
+リモートは `uttne/recoding`、既定ブランチは `main` である。`.github/ISSUE_TEMPLATE/` と `.github/pull_request_template.md` は無い。本文は下の見出しで書く。テンプレートが増えたら、その見出しを満たしたうえで `Closes #<番号>`、変更点、テスト結果を残す。`gh` は対話プロンプトを出さないよう、本文はファイルに書いて `--body-file` で渡す。`.github/pull_request_template.md` が無いので、`docs/review/report-format.md` のレポートは PR 本文に続ける。
 
 ### Issue の取得
 
@@ -133,7 +148,11 @@ Closes #<number>
 
 ## テスト
 - mise exec -- npm test:
+
+## 🤖 AI レビューサマリー
 ```
+
+`## 🤖 AI レビューサマリー` 以降は `docs/review/report-format.md` のテンプレートをそのまま埋める。UI を変えたときは変更前と変更後のスクリーンショットを、データの流れやモジュールの依存が変わったときは Mermaid 図を、同じ本文に入れる。
 
 CI を見るときは、作成された PR 番号で確認する。
 
