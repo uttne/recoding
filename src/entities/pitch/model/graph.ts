@@ -20,7 +20,7 @@ const COLOR: Record<DetectorId, string> = {
 };
 
 /** One pitch color for the performance view. Detector hues stay behind the debug switch. */
-export const UNIFIED_PITCH_COLOR = "#f2b48a";
+export const UNIFIED_PITCH_COLOR = "#e6a15c";
 
 function traceColor(detector: DetectorId, provisional: boolean): string {
   if (detector === "acf-basic") return provisional ? COLOR.acf2 : COLOR["basic-mono"];
@@ -209,8 +209,8 @@ export type PitchTimeLayout = {
   midiHigh: number;
 };
 
-/** Sung pitch stroke in CSS pixels. Thicker than every pitch-grid tier. */
-export const PITCH_TRACE_CSS = 3.4;
+/** Sung pitch stroke in CSS pixels. Thicker than every pitch-grid tier, even when the grid is opaque. */
+export const PITCH_TRACE_CSS = 4.8;
 
 /**
  * Pitch-grid stroke in CSS pixels, before `devicePixelRatio`.
@@ -227,16 +227,11 @@ export const PITCH_GRID_CSS = {
 
 export type PitchGridTier = keyof typeof PITCH_GRID_CSS;
 
-const CHROMATIC_GRID_COLOR: Record<PitchGridTier, string> = {
-  main: "rgba(243,234,215,0.28)",
-  middle: "rgba(243,234,215,0.12)",
-  guide: "rgba(243,234,215,0.05)",
-};
-
-const SCALE_GRID_COLOR: Record<PitchGridTier, string> = {
-  main: "rgba(243,234,215,0.55)",
-  middle: "rgba(243,234,215,0.28)",
-  guide: "rgba(243,234,215,0.12)",
+/** Same cream for chromatic and scale. Main is opaque, guide stays a visible line. */
+export const PITCH_GRID_COLOR: Record<PitchGridTier, string> = {
+  main: "rgba(243,234,215,1)",
+  middle: "rgba(243,234,215,0.78)",
+  guide: "rgba(243,234,215,0.55)",
 };
 
 const WHITE_KEY_PITCH_CLASS = new Set([2, 4, 5, 7, 9, 11]);
@@ -256,14 +251,10 @@ export function scaleGridTier(role: ScaleRole): PitchGridTier {
   return "guide";
 }
 
-export function pitchGridStroke(
-  tier: PitchGridTier,
-  kind: "chromatic" | "scale",
-  ratio: number,
-): { lineWidth: number; strokeStyle: string } {
+export function pitchGridStroke(tier: PitchGridTier, ratio: number): { lineWidth: number; strokeStyle: string } {
   return {
     lineWidth: PITCH_GRID_CSS[tier] * ratio,
-    strokeStyle: (kind === "chromatic" ? CHROMATIC_GRID_COLOR : SCALE_GRID_COLOR)[tier],
+    strokeStyle: PITCH_GRID_COLOR[tier],
   };
 }
 
@@ -322,7 +313,7 @@ export function paintPitchTimeAxes(
     const pitchClass = ((midi % 12) + 12) % 12;
     if (scale.kind === "chromatic") {
       const tier = chromaticGridTier(pitchClass);
-      const stroke = pitchGridStroke(tier, "chromatic", ratio);
+      const stroke = pitchGridStroke(tier, ratio);
       ctx.lineWidth = stroke.lineWidth;
       ctx.strokeStyle = stroke.strokeStyle;
       ctx.beginPath();
@@ -339,7 +330,7 @@ export function paintPitchTimeAxes(
     }
     const role = scaleRole(pitchClass, scale);
     if (!role) continue;
-    const stroke = pitchGridStroke(scaleGridTier(role), "scale", ratio);
+    const stroke = pitchGridStroke(scaleGridTier(role), ratio);
     ctx.lineWidth = stroke.lineWidth;
     ctx.strokeStyle = stroke.strokeStyle;
     ctx.beginPath();

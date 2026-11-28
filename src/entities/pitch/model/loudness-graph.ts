@@ -124,7 +124,7 @@ export class LoudnessGraph {
       };
       if (this.scale.kind === "chromatic") {
         const tier = chromaticGridTier(pitchClass);
-        const stroke = pitchGridStroke(tier, "chromatic", ratio);
+        const stroke = pitchGridStroke(tier, ratio);
         ctx.lineWidth = stroke.lineWidth;
         ctx.strokeStyle = stroke.strokeStyle;
         ctx.beginPath();
@@ -140,7 +140,7 @@ export class LoudnessGraph {
       }
       const role = scaleRole(pitchClass, this.scale);
       if (!role) continue;
-      const stroke = pitchGridStroke(scaleGridTier(role), "scale", ratio);
+      const stroke = pitchGridStroke(scaleGridTier(role), ratio);
       ctx.lineWidth = stroke.lineWidth;
       ctx.strokeStyle = stroke.strokeStyle;
       ctx.beginPath();

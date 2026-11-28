@@ -194,15 +194,15 @@ describe("pitch grid weight", () => {
   it("draws C thicker than the other white keys, and those thicker than the black keys", () => {
     const { ctx, strokes } = recordingContext();
     paintPitchTimeAxes(ctx, 800, 400, 1, 440, { style: { ...octave, scale: { kind: "chromatic" } } });
-    const c = widthsFor(strokes, "rgba(243,234,215,0.28)");
-    const white = widthsFor(strokes, "rgba(243,234,215,0.12)");
-    const black = widthsFor(strokes, "rgba(243,234,215,0.05)");
+    const c = widthsFor(strokes, "rgba(243,234,215,1)");
+    const white = widthsFor(strokes, "rgba(243,234,215,0.78)");
+    const black = widthsFor(strokes, "rgba(243,234,215,0.55)");
     expect(c).toHaveLength(2);
     expect(white).toHaveLength(6);
     expect(black).toHaveLength(5);
-    expect(c[0]).toBe(pitchGridStroke("main", "chromatic", 1).lineWidth);
-    expect(white[0]).toBe(pitchGridStroke("middle", "chromatic", 1).lineWidth);
-    expect(black[0]).toBe(pitchGridStroke("guide", "chromatic", 1).lineWidth);
+    expect(c[0]).toBe(pitchGridStroke("main", 1).lineWidth);
+    expect(white[0]).toBe(pitchGridStroke("middle", 1).lineWidth);
+    expect(black[0]).toBe(pitchGridStroke("guide", 1).lineWidth);
     expect(new Set(c)).toEqual(new Set([c[0]]));
     expect(new Set(white)).toEqual(new Set([white[0]]));
     expect(new Set(black)).toEqual(new Set([black[0]]));
@@ -218,28 +218,29 @@ describe("pitch grid weight", () => {
     paintPitchTimeAxes(ctx, 800, 400, 1, 440, {
       style: { ...octave, scale: { kind: "chord", root: 0, quality: "major" } },
     });
-    const root = widthsFor(strokes, "rgba(243,234,215,0.55)");
-    const chord = widthsFor(strokes, "rgba(243,234,215,0.28)");
-    const degree = widthsFor(strokes, "rgba(243,234,215,0.12)");
+    const root = widthsFor(strokes, "rgba(243,234,215,1)");
+    const chord = widthsFor(strokes, "rgba(243,234,215,0.78)");
+    const degree = widthsFor(strokes, "rgba(243,234,215,0.55)");
     expect(strokes).toHaveLength(8);
     expect(root).toHaveLength(2);
     expect(chord).toHaveLength(2);
     expect(degree).toHaveLength(4);
-    expect(root[0]).toBe(pitchGridStroke("main", "scale", 1).lineWidth);
-    expect(chord[0]).toBe(pitchGridStroke("middle", "scale", 1).lineWidth);
-    expect(degree[0]).toBe(pitchGridStroke("guide", "scale", 1).lineWidth);
+    expect(root[0]).toBe(pitchGridStroke("main", 1).lineWidth);
+    expect(chord[0]).toBe(pitchGridStroke("middle", 1).lineWidth);
+    expect(degree[0]).toBe(pitchGridStroke("guide", 1).lineWidth);
     expect(root[0]).toBeGreaterThan(chord[0]);
     expect(chord[0]).toBeGreaterThan(degree[0]);
-    expect(root[0]).toBe(pitchGridStroke("main", "chromatic", 1).lineWidth);
+    expect(pitchGridStroke("main", 1).strokeStyle).toBe("rgba(243,234,215,1)");
+    expect(pitchGridStroke("guide", 1).strokeStyle).toBe("rgba(243,234,215,0.55)");
   });
 
   it("multiplies every grid tier by the device pixel ratio", () => {
     vi.stubGlobal("window", { devicePixelRatio: 2 });
     const { ctx, strokes } = recordingContext();
     paintPitchTimeAxes(ctx, 800, 400, 1, 440, { style: { ...octave, scale: { kind: "chromatic" } } });
-    const c = widthsFor(strokes, "rgba(243,234,215,0.28)");
-    const white = widthsFor(strokes, "rgba(243,234,215,0.12)");
-    const black = widthsFor(strokes, "rgba(243,234,215,0.05)");
+    const c = widthsFor(strokes, "rgba(243,234,215,1)");
+    const white = widthsFor(strokes, "rgba(243,234,215,0.78)");
+    const black = widthsFor(strokes, "rgba(243,234,215,0.55)");
     expect(c[0]).toBe(PITCH_GRID_CSS.main * 2);
     expect(white[0]).toBe(PITCH_GRID_CSS.middle * 2);
     expect(black[0]).toBe(PITCH_GRID_CSS.guide * 2);
@@ -265,5 +266,25 @@ describe("PitchGraph", () => {
     expect(trace[0].lineWidth).toBe(PITCH_TRACE_CSS);
     expect(trace[0].lineWidth).toBeGreaterThan(Math.max(...grid.map((stroke) => stroke.lineWidth)));
     expect(trace[0].lineWidth).toBeGreaterThan(PITCH_GRID_CSS.main);
+  });
+
+  it("paints the unified trace in orange, apart from the cream grid", () => {
+    const { ctx, strokes } = recordingContext();
+    const canvas = {
+      width: 800,
+      height: 400,
+      clientWidth: 800,
+      clientHeight: 400,
+      getContext: () => ctx,
+    };
+    const graph = new PitchGraph(canvas as unknown as HTMLCanvasElement);
+    graph.draw([point({ time: 1, hz: 440, detector: "mpm" }), point({ time: 1.02, hz: 442, detector: "mpm" })], 1.02, {
+      style: { distinguish: false, guides: false, pending: false },
+    });
+    const trace = strokes.filter((stroke) => stroke.strokeStyle === "#e6a15c");
+    const grid = strokes.filter((stroke) => stroke.strokeStyle.startsWith("rgba(243,234,215"));
+    expect(trace).toHaveLength(1);
+    expect(strokes.some((stroke) => stroke.strokeStyle === "#e6d36a")).toBe(false);
+    expect(trace[0].lineWidth).toBeGreaterThan(Math.max(...grid.map((stroke) => stroke.lineWidth)));
   });
 });
