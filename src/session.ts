@@ -4,7 +4,7 @@ import { BASIC_FMAX_HZ, BASIC_FMIN_HZ } from "./audio/basicpitch";
 import { CREPE_FMAX_HZ, CREPE_FMIN_HZ } from "./audio/crepe";
 import { renderDownload } from "./audio/download";
 import type { AudioFormat } from "./audio/encode";
-import { PitchEngine, type DetectorId, type PitchPoint } from "./audio/engine";
+import { PitchEngine, audioInputOptions, type DetectorId, type MicChoice, type PitchPoint } from "./audio/engine";
 import { int16ToFloat } from "./audio/pcm";
 import { MPM_FMAX_HZ, MPM_FMIN_HZ } from "./audio/mpm";
 import { centsOff, hzToMidi, noteName } from "./audio/notes";
@@ -74,6 +74,8 @@ export type Snapshot = {
   guides: boolean;
   pending: boolean;
   scaleId: string;
+  micId: string;
+  mics: readonly MicChoice[];
   csvDisabled: boolean;
 };
 
@@ -113,6 +115,8 @@ let distinguish = false;
 let guides = true;
 let pending = false;
 let scale: ScaleChoice = { kind: "chromatic" };
+let micId = "";
+let mics: MicChoice[] = [];
 let selectedId: string | null = null;
 let playingId: string | null = null;
 let storing = false;
@@ -186,6 +190,8 @@ function build(): Snapshot {
     guides,
     pending,
     scaleId: scaleChoiceId(scale),
+    micId,
+    mics,
     csvDisabled: points.length === 0,
   };
 }
@@ -230,6 +236,8 @@ let snapshot: Snapshot = {
   guides,
   pending,
   scaleId: "chromatic",
+  micId: "",
+  mics: [],
   csvDisabled: true,
 };
 
@@ -446,6 +454,7 @@ export async function toggleMic(): Promise<void> {
   try {
     if (engine.mode === "file") engine.stop();
     await engine.start();
+    await refreshMics();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     statusText = `マイクを開始できませんでした: ${message}`;
@@ -465,7 +474,10 @@ export async function toggleRecord(): Promise<void> {
   publish();
   try {
     if (engine.mode === "file") engine.stop();
-    if (engine.mode !== "mic") await engine.start();
+    if (engine.mode !== "mic") {
+      await engine.start();
+      await refreshMics();
+    }
     engine.startRecording();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -633,6 +645,39 @@ export function setScale(id: string): void {
   publish();
 }
 
+export async function refreshMics(): Promise<void> {
+  if (typeof navigator === "undefined" || !navigator.mediaDevices?.enumerateDevices) return;
+  try {
+    mics = audioInputOptions(await navigator.mediaDevices.enumerateDevices());
+    publish();
+  } catch {
+    // The list stays as it was. The default device still opens.
+  }
+}
+
+export async function setMic(id: string): Promise<void> {
+  if (engine.recording || id === micId) return;
+  micId = id;
+  engine.micId = id;
+  if (engine.mode !== "mic") {
+    publish();
+    return;
+  }
+  armingMic = true;
+  publish();
+  try {
+    engine.stop(true);
+    await engine.start();
+    await refreshMics();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    statusText = `マイクを切り替えられませんでした: ${message}`;
+  } finally {
+    armingMic = false;
+    publish();
+  }
+}
+
 export function clearGraph(): void {
   points.length = 0;
   confirmed.clear();
@@ -680,6 +725,12 @@ engine.detector = "acf-basic";
 applyCeilings();
 snapshot = build();
 engine.preloadModel();
+if (typeof navigator !== "undefined" && navigator.mediaDevices?.addEventListener) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    void refreshMics();
+  });
+}
+void refreshMics();
 void reloadRecordings().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   statusText = `保存した録音を読めませんでした: ${message}`;

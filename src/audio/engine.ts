@@ -23,36 +23,61 @@ export type DetectorId = "acf2" | "acf-basic" | "swiftf0" | "mpm" | "pyin" | "cr
  * the browser lists it, because an unknown constraint can reject the microphone.
  * `true` means no override, so the browser keeps its default.
  */
-export function rawMicConstraints(supported: MediaTrackSupportedConstraints): MediaTrackConstraints | true {
+export function rawMicConstraints(supported: MediaTrackSupportedConstraints, deviceId = ""): MediaTrackConstraints | true {
   const audio: MediaTrackConstraints = {};
   if (supported.echoCancellation) audio.echoCancellation = false;
   if (supported.noiseSuppression) audio.noiseSuppression = false;
   if (supported.autoGainControl) audio.autoGainControl = false;
+  if (deviceId && supported.deviceId) audio.deviceId = { exact: deviceId };
   return Object.keys(audio).length > 0 ? audio : true;
+}
+
+export type MicChoice = { id: string; label: string };
+
+/** Audio inputs from `enumerateDevices`. Empty labels become 「マイク 1」 until the browser may name them. */
+export function audioInputOptions(devices: readonly { kind: string; deviceId: string; label: string }[]): MicChoice[] {
+  const inputs = devices.filter((device) => device.kind === "audioinput" && device.deviceId);
+  return inputs.map((device, index) => ({
+    id: device.deviceId,
+    label: device.label.trim() || `マイク ${index + 1}`,
+  }));
 }
 
 function isOverconstrained(error: unknown): boolean {
   return error instanceof DOMException && error.name === "OverconstrainedError";
 }
 
-/** Prefer an unprocessed mic. If the device cannot disable processing, open it with the browser default. */
-async function openRawMic(audio: MediaTrackConstraints | true): Promise<MediaStream> {
-  try {
-    const media = await navigator.mediaDevices.getUserMedia({ audio, video: false });
-    if (audio !== true) {
-      const track = media.getAudioTracks()[0];
-      if (track) {
-        try {
-          await track.applyConstraints(audio);
-        } catch {
-          // The stream stays open. The device kept its own processing.
-        }
+async function acquireMic(audio: MediaTrackConstraints | true): Promise<MediaStream> {
+  const media = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+  if (audio !== true) {
+    const track = media.getAudioTracks()[0];
+    if (track) {
+      try {
+        await track.applyConstraints(audio);
+      } catch {
+        // The stream stays open. The device kept its own processing.
       }
     }
-    return media;
+  }
+  return media;
+}
+
+/** Prefer an unprocessed mic. A missing chosen device falls back to the default input. */
+async function openRawMic(audio: MediaTrackConstraints | true): Promise<MediaStream> {
+  try {
+    return await acquireMic(audio);
   } catch (error) {
     if (audio === true || !isOverconstrained(error)) throw error;
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    if (audio.deviceId) {
+      const { deviceId: _deviceId, ...rest } = audio;
+      const withoutDevice: MediaTrackConstraints | true = Object.keys(rest).length > 0 ? rest : true;
+      try {
+        return await acquireMic(withoutDevice);
+      } catch (again) {
+        if (!isOverconstrained(again)) throw again;
+      }
+    }
+    return acquireMic(true);
   }
 }
 
@@ -115,6 +140,8 @@ export class PitchEngine {
   pyinFmax = PYIN_FMAX_HZ;
   crepeFmax = CREPE_FMAX_HZ;
   basicFmax = BASIC_FMAX_HZ;
+  /** Empty uses the browser's default input. */
+  micId = "";
   private detectorId: DetectorId = "acf2";
   private context: AudioContext | null = null;
   private media: MediaStream | null = null;
@@ -176,7 +203,7 @@ export class PitchEngine {
 
   async start(): Promise<void> {
     if (this.running) return;
-    const audio = rawMicConstraints(navigator.mediaDevices.getSupportedConstraints());
+    const audio = rawMicConstraints(navigator.mediaDevices.getSupportedConstraints(), this.micId);
     const AudioCtx = window.AudioContext;
     this.context = new AudioCtx();
     try {

@@ -22,6 +22,8 @@ import {
   setFormat,
   setGuides,
   setPending,
+  refreshMics,
+  setMic,
   setScale,
   setView,
   selectRecording,
@@ -309,6 +311,10 @@ function Settings({
   onOpenChange: (open: boolean) => void;
   state: Snapshot;
 }) {
+  useEffect(() => {
+    if (open) void refreshMics();
+  }, [open]);
+  const selectedMissing = state.micId !== "" && !state.mics.some((mic) => mic.id === state.micId);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
@@ -325,6 +331,23 @@ function Settings({
           </div>
 
           <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <label className="block text-sm sm:col-span-2">
+              <span className="text-muted">マイク</span>
+              <select
+                className="mt-1 h-11 w-full rounded-xl border border-line bg-panel px-3"
+                value={state.micId}
+                disabled={state.recording}
+                onChange={(event) => void setMic(event.target.value)}
+              >
+                <option value="">既定のマイク</option>
+                {state.mics.map((mic) => (
+                  <option key={mic.id} value={mic.id}>
+                    {mic.label}
+                  </option>
+                ))}
+                {selectedMissing ? <option value={state.micId}>前回のマイク</option> : null}
+              </select>
+            </label>
             <label className="block text-sm">
               <span className="text-muted">検出</span>
               <select
