@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { cpSync, createReadStream, mkdirSync, rmSync } from "node:fs";
 import { extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 
 const ortFiles = ["ort-wasm-simd-threaded.wasm", "ort-wasm-simd-threaded.mjs"];
@@ -53,6 +54,11 @@ if (!isDataURI(wasmBinaryFile)) {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   plugins: [react(), tailwindcss(), ortRuntime(), flacWasm()],
   optimizeDeps: {
     exclude: ["libflacjs"],

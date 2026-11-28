@@ -73,7 +73,7 @@ SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始
 
 ## 画面が持っている状態
 
-`src/session.ts` が次を持ちます。
+`src/entities/session/model/session.ts` が次を持ちます。
 
 | 状態 | 場所 | 意味 |
 |---|---|---|
@@ -88,7 +88,7 @@ SwiftF0 のモデル読み込みはページ表示時の `preloadModel()` で始
 
 画面はビューポートの高さに固定し、音程・帯・大きさのどれか一つを中央に出します。通常の線は `#f2b48a` の 1 色で、ACF2+→Basic の置き換えでもストロークを分けません。そのとき ACF2+→Basic の接続幅は確定点と同じ 0.75 半音です。設定の「検出の色分け」で、検出器ごとの色と、暫定から確定への色の切れ目に戻します。「未確定の区間」と「音域のガイド」も設定のスイッチです。
 
-`src/graph.ts` の全体表示は MIDI 30（F♯1 付近）から、少なくとも 108（C8）までです。どれかの上限が C8 を超えると、その音が収まるところまで上へ伸ばします。画面下の「全体 / 固定 / 追従」で、三つのグラフが同じ音程の範囲を使います。固定は下限と上限を MIDI 番号で入力するか、音名の一覧から選びます。保存されるのは 0 から 127 の整数で、その範囲は C-1 から G9 まで一つずつ音名があります。小数は最も近い半音に、範囲の外は 0 か 127 に丸めてから音名になります。幅は少なくとも 1 オクターブです。リセットは C3 から C5 に戻します。追従は指定した幅（初期値は 2 オクターブ）の窓で、最新の有音が端から約 22% に入ったときだけ動き、動いたあとはその端から約 38% の位置に置きます。無音のあいだ窓は留まり、移動そのものは約 0.2 秒で近づきます。スケールが「半音」のときは、C の線だけ音名を左に出します。コードのスケールを選ぶと、その音階の音だけに線を引き、根音に音名を付けます。規則は `src/scale.ts` です。音域のガイドを入れると、選択中の検出器の下限と上限を破線と音名で示し、下限より下と上限より上を暗くします。半音の半分を超える飛び（Basic Pitch の単音と重音、および ACF2+→Basic の確定点どうしは 0.75 半音）、50 ms を超える時間の空き、検出器の切り替わり、無音では線を切ります。色分けを入れたときの ACF2+→Basic は、暫定点どうし、および暫定と確定の境が半音の半分以内なら色が変わっても境界を共有します。Basic Pitch の重音は、近い音どうしを別の線としてつなぎます。範囲外の MIDI は上下の端に張り付きます。Hz 自体は点に残るので、CSV には範囲外の周波数も入ります。重音の CSV は、同じ時刻の音を 1 行ずつ書きます。
+`src/entities/pitch/model/graph.ts` の全体表示は MIDI 30（F♯1 付近）から、少なくとも 108（C8）までです。どれかの上限が C8 を超えると、その音が収まるところまで上へ伸ばします。画面下の「全体 / 固定 / 追従」で、三つのグラフが同じ音程の範囲を使います。固定は下限と上限を MIDI 番号で入力するか、音名の一覧から選びます。保存されるのは 0 から 127 の整数で、その範囲は C-1 から G9 まで一つずつ音名があります。小数は最も近い半音に、範囲の外は 0 か 127 に丸めてから音名になります。幅は少なくとも 1 オクターブです。リセットは C3 から C5 に戻します。追従は指定した幅（初期値は 2 オクターブ）の窓で、最新の有音が端から約 22% に入ったときだけ動き、動いたあとはその端から約 38% の位置に置きます。無音のあいだ窓は留まり、移動そのものは約 0.2 秒で近づきます。スケールが「半音」のときは、C の線だけ音名を左に出します。コードのスケールを選ぶと、その音階の音だけに線を引き、根音に音名を付けます。規則は `src/entities/pitch/model/scale.ts` です。音域のガイドを入れると、選択中の検出器の下限と上限を破線と音名で示し、下限より下と上限より上を暗くします。半音の半分を超える飛び（Basic Pitch の単音と重音、および ACF2+→Basic の確定点どうしは 0.75 半音）、50 ms を超える時間の空き、検出器の切り替わり、無音では線を切ります。色分けを入れたときの ACF2+→Basic は、暫定点どうし、および暫定と確定の境が半音の半分以内なら色が変わっても境界を共有します。Basic Pitch の重音は、近い音どうしを別の線としてつなぎます。範囲外の MIDI は上下の端に張り付きます。Hz 自体は点に残るので、CSV には範囲外の周波数も入ります。重音の CSV は、同じ時刻の音を 1 行ずつ書きます。
 
 SwiftF0、pYIN、Tiny-CREPE、Basic Pitch、ACF2+→Basic を選択してマイクが動作し、未確定の区間を描くあいだは、最後に確定した点から右端までを、その検出器の色のアルファ 0.12 で塗ります。色分けを入れた ACF2+→Basic の帯だけは ACF2+ の色で、いちばん新しい Basic Pitch のフレームから右端までです。その検出器へ切り替えたあとまだ点が無いときは、切り替えた時刻から塗ります。この帯は未確定の区間であり、無音ではありません。停止中と、ACF2+ または MPM の選択中は塗りません。
 
@@ -128,11 +128,11 @@ SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxrunt
 
 | やりたいこと | 触るファイル |
 |---|---|
-| 画面の配置、設定、操作 | `src/ui/app.tsx`、`src/session.ts`、必要なら `index.html` |
-| 設定の保存 | `src/preferences.ts` |
-| IndexedDB の録音ファイル | `src/recordings.ts` |
+| 画面の配置、設定、操作 | `src/pages`、`src/widgets`、`src/features`、`src/entities/session/model/session.ts` |
+| 設定の保存 | `src/entities/session/model/preferences.ts` |
+| IndexedDB の録音ファイル | `src/entities/recording/model/recordings.ts` |
 | WAV、FLAC、MP3 | `src/audio/wav.ts`、`src/audio/encode.ts`、`src/audio/encode.worker.ts` |
-| 線の色、見える音域、何秒分描くか | `src/graph.ts` |
+| 線の色、見える音域、何秒分描くか | `src/entities/pitch/model/graph.ts` |
 | マイクの制約、16 ms の間隔、再生 | `src/audio/engine.ts` |
 | ACF2+ の式やしきい値 | `src/audio/acf2.ts` と `src/audio/acf2.test.ts` |
 | ACF2+→Basic の置き換え | `src/audio/acf-basic.ts` と `src/audio/acf-basic.test.ts` |
@@ -145,7 +145,7 @@ SwiftF0、Tiny-CREPE、Basic Pitch は、それぞれ別の Worker で `onnxrunt
 | Worker との送受信 | `src/audio/swiftf0-session.ts`、`crepe-session.ts`、`basicpitch-session.ts` |
 | 16 kHz または 22050 Hz への変換 | `src/audio/resample.ts` |
 | 音名と MIDI の式 | `src/audio/notes.ts` |
-| コードのスケール罫線 | `src/scale.ts` と `src/graph.ts` |
+| コードのスケール罫線 | `src/entities/pitch/model/scale.ts` と `src/entities/pitch/model/graph.ts` |
 | WASM の配信パス | `vite.config.ts` と各 `*.worker.ts` の `wasmPaths` |
 
 Worklet は Vite のモジュールではなく `public/capture-worklet.js` です。`AudioWorkletGlobalScope` で動き、DOM や `src/` の import は使えません。ブロック長を変えるときは、メイン側が任意長の `Float32Array` を受け取れることを確認します。今の `onChunk` は長さを固定していません。

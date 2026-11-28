@@ -33,6 +33,7 @@ mise をシェルに有効化している場合は `mise exec --` を外して `
 | `mise exec -- npm test` | Vitest。正弦波と、モデルを呼ばないストリーム制御 |
 | `mise exec -- npm run build` | 型チェックのあと `dist/` を作ります |
 | `mise exec -- npm run preview` | `dist/` をローカル配信します |
+| `mise exec -- npm run storybook` | 部品の見た目を `http://localhost:6006/` で確認します |
 
 `vite.config.ts` を変えたあとは、開発サーバーを止めてから `npm run dev` をやり直します。設定ファイルは起動中のプロセスに自動では入りません。
 
@@ -65,24 +66,20 @@ public/models/swift-f0.onnx
 public/models/crepe-tiny.onnx
 public/models/nmp.onnx
 public/models/LICENSE-*.txt
-src/main.tsx              React の起点
-src/ui/app.tsx            一画面の配置、操作、設定
-src/session.ts            マイク、録音、再生、描画ループ
-src/preferences.ts        設定の localStorage
-src/recordings.ts         IndexedDB の録音ファイル
+src/app/main.tsx          React の起点
+src/pages/recorder        画面の組み立て
+src/widgets               ヘッダー、フッター、ステージ、設定、録音一覧
+src/features              マイク、録音、再生、スケール、音程の範囲
+src/entities/session      マイク、録音、再生、描画ループ
+src/entities/session/model/preferences.ts  設定の localStorage
+src/entities/recording    IndexedDB の録音ファイル
 src/audio/pcm.ts          Float32 と 16 bit PCM
 src/audio/wav.ts          WAV の読み書き
 src/audio/encode.ts       FLAC と MP3
 src/audio/encode.worker.ts 変換をメインスレッドの外で行う
 src/audio/download.ts     形式を選んでファイルを作る
-src/graph.ts              時間とピッチのキャンバス
-src/loudness-graph.ts     ピッチと大きさのキャンバス
-src/loudness.ts           大きさの dB と、点に対応する RMS
-src/ribbon-graph.ts       時間・ピッチ・音量のキャンバス
-src/ribbon.ts             音量のにじみ幅と、声部に沿った中央値
-src/scale.ts              コードごとのスケール罫線
-src/pitch-axis.ts         音程の表示範囲（全体、固定、追従）
-src/index.css             Tailwind と画面の色
+src/entities/pitch/model  ピッチ、帯、大きさ、スケール、音程の範囲。描画は requestAnimationFrame のまま
+src/app/styles/index.css  Tailwind と画面の色
 src/audio/engine.ts       マイク、保存した録音の再生、検出器の選択、時刻
 src/audio/acf2.ts         ACF2+
 src/audio/acf-basic.ts    ACF2+ の暫定点を Basic Pitch で置き換える
