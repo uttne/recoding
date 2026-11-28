@@ -50,3 +50,9 @@ mise をシェルに有効化している場合は `mise exec --` を外して�
 表に無い処理のうち、ファイルを読む、文字列を組み立てる、JSON を数える、ブラウザへ渡す式をファイルから作る、といったものは `mise exec -- node` で行う。Python は使わない。PowerShell の .NET 静的呼び出しで文字列を加工しない。`[Text.Encoding]::UTF8.GetBytes` や `[Convert]::ToBase64String` は、その静的呼び出しである。
 
 `orca eval` の `--expression` は、式をファイルに書いてから渡す。式の中の引用符を消すために、スクリプトを Base64 へ包んで `eval(atob(...))` として渡さない。グラフの目盛りを数える処理も、バイト列への変換が要るわけではない。Node で読めるファイルと、ブラウザ上の `orca` の操作に分ける。
+
+PR にレビューレポートと、見た目の変更なら画像が載っているかは、次で確認する。GitHub Actions の `review-evidence` も同じスクリプトである。
+
+```powershell
+mise exec -- node scripts/check-review-evidence.mjs <PR番号>
+```
