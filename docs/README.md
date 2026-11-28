@@ -2,14 +2,13 @@
 
 ブラウザだけで動く音程レコーダーです。マイクの波形から基本周波数を推定し、直近 8 秒を一画面のグラフに描きます。初期の検出は ACF2+→Basic で、ほかの検出器は設定から選べます。音声も推定結果もサーバーへ送りません。
 
-この文書は、コードを初めて開いた人が環境を起動し、どこを読めばよいか分かるところまでを担当します。処理のつながりは [architecture.md](architecture.md)、検出器の契約は [detectors.md](detectors.md) です。
+この文書は、コードを初めて開いた人がどこを読めばよいか分かるところまでを担当します。環境の入れ方とコマンドは [development.md](development.md)、処理のつながりは [architecture.md](architecture.md)、検出器の契約は [detectors.md](detectors.md) です。
 
 ## 前提
 
 - Windows 上で開発している想定です。コマンドは PowerShell です。
-- Node.js は mise で入れます。バージョンはリポジトリ直下の `mise.toml` が `node = "22"` と指定しています。
+- 環境は [development.md](development.md) の手順で入れます。Node も npm も mise の中にあり、mise を通さないコマンドは使えません。
 - マイクが使えること。ページは `http://localhost` で開けばマイク許可を求められます。
-- 依存のインストールは npm で、`package-lock.json` を使います。`mise.toml` は pnpm もツールに入れていますが、Storybook を含むいまの依存は `package-lock.json` に固定されています。
 
 ## 最初の起動
 
@@ -17,9 +16,11 @@
 
 ```powershell
 mise install
-mise exec -- npm install
+mise exec -- npm ci
 mise exec -- npm run dev
 ```
+
+手順の意味は [development.md](development.md) にあります。
 
 Vite が `http://localhost:5173/` を表示します。ポートが使用中なら、表示された別ポートを開きます。ブラウザで「マイクを開始」を押し、許可したあと声や単音を入れると線が右端から左へ流れます。画面は React と Tailwind CSS です。ボタンと設定ダイアログは `src/shared/ui` にあり、Dialog と Switch は Radix です。部品の見た目は Storybook で確認します。
 
@@ -35,7 +36,7 @@ mise をシェルに有効化している場合は `mise exec --` を外して `
 | `mise exec -- npm run preview` | `dist/` をローカル配信します |
 | `mise exec -- npm run storybook` | 部品の見た目を `http://localhost:6006/` で確認します |
 
-`vite.config.ts` を変えたあとは、開発サーバーを止めてから `npm run dev` をやり直します。設定ファイルは起動中のプロセスに自動では入りません。
+`vite.config.ts` を変えたあとは、開発サーバーを止めてから `mise exec -- npm run dev` をやり直します。設定ファイルは起動中のプロセスに自動では入りません。コマンドの一覧は [development.md](development.md) です。
 
 ## 画面の仕様
 
@@ -63,7 +64,7 @@ mise をシェルに有効化している場合は `mise exec --` を外して `
 ## ディレクトリ
 
 ```text
-mise.toml                 Node 22 の指定。pnpm もツールとして入る
+mise.toml                 Node 22 と pnpm。使い方は docs/development.md
 package.json              npm scripts と依存
 package-lock.json         いまの依存を固定するロックファイル
 vite.config.ts            @ エイリアス、開発サーバーのヘッダ、ONNX Runtime と FLAC wasm の配信

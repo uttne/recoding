@@ -1,5 +1,5 @@
-# 新しい worktree の直後に実行する。Node は mise.toml の 22。
-# 依存の正は package-lock.json（docs/README.md）。クリーンな作業ツリーでは npm ci にする。
+# 新しい worktree の直後に実行する。コマンドは docs/development.md の依存インストールと同じ。
+# Node も npm も mise の中にある。mise を通さない pnpm や npm は、この環境では見つからない。
 # node_modules は共有しない。ブランチごとに lockfile が変わると、共有した依存ツリーが壊れる。
 # dist、storybook-static、.vite、public/ort も共有しない。ビルド成果物か、Vite が起動時に消す一時ディレクトリだから。
 # npm のキャッシュはリポジトリの外にあるので、sharedDirectories には置かない。

@@ -2,27 +2,33 @@
 
 人間は親エージェントとだけ話す。親は実装を自分で抱えず、Orca の子 worktree と子エージェントに渡す。コマンドは Orca 1.4.280 の `orca`（`orca.exe`）で確認したもの。
 
-このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。Node は `mise.toml` の 22。依存のインストールは `mise exec -- npm ci`（ロックは `package-lock.json`）。テストは `mise exec -- npm test`、ビルドは `mise exec -- npm run build`。データベースは無い。
+このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。データベースは無い。環境の入れ方、依存のインストール、テスト、ビルドは `docs/development.md` だけに従う。そこに無いコマンドを作らない。子のプロンプトに書くテストも、その文書の `mise exec -- npm test` である。
 
 ## 1. 役割分担
 
 親は作業を、変更ファイルがほとんど重ならない単位に分ける。1 単位が 1 つの GitHub Issue になる。番号の読み方と起票は「5. GitHub Issue 連携」に従う。
 
-親が自分で行うのは、分割、Issue の起票、子の起動、結果の確認、作業ブランチの push、PR の作成、人間への報告までである。子のプロンプトには、Issue のタイトル・本文・受け入れ条件、触ってよいパス、完了時に `mise exec -- npm test` を実行することを書く。
+親が自分で行うのは、分割、Issue の起票、子の起動、結果の確認、作業ブランチの push、PR の作成、人間への報告までである。子のプロンプトには、Issue のタイトル・本文・受け入れ条件、触ってよいパス、完了時に `docs/development.md` のテストコマンドを実行することを書く。
 
 ## 2. 子ワークスペースの作成と実行
 
 使うエージェントは `orca agent installed --json` の `default: true` とする。人間が名前を指定したときはその id にする。
 
-サブタスクごとに、現在のワークスペースの子として worktree を作る。先に「5. GitHub Issue 連携」で Issue 番号とブランチ名を決める。Git の起点はリポジトリの既定ベース（`main`）なので、`--base-branch` は付けない。画面を子へ切り替えないので、`--activate` と `--run-hooks` は付けない。`--setup run` で `orca.yaml` の `npm ci` を必ず走らせる。`--branch` にブランチ名、`--issue` に Issue 番号を渡す。
+サブタスクごとに、現在のワークスペースの子として worktree を作る。先に「5. GitHub Issue 連携」で Issue 番号とブランチ名を決める。Git の起点はリポジトリの既定ベース（`main`）なので、`--base-branch` は付けない。画面を子へ切り替えないので、`--activate` と `--run-hooks` は付けない。`--branch` にブランチ名、`--issue` に Issue 番号を渡す。`--setup run` で `orca.yaml` のセットアップを走らせる。そのコマンドは `docs/development.md` の依存インストールと同じ `mise exec -- npm ci` である。
+
+Issue の実装に `orca orchestration worker-start`、`task-create`、`run-create`、`dispatch` は使わない。これらには `--branch` と `--issue` が無く、起動結果のハンドルもこの手順の待ち方と合わない。`worker-start` が失敗したあとの `--retry-of` でも、同じ起動を繰り返さない。
+
+子を作る前に、Orca が実行するセットアップ文を見る。`docs/development.md` の `mise exec -- npm ci` でないときは子を作らない。mise を通さない `pnpm` や `npm` は、この環境では見つからず失敗する。`orca.yaml` より先に別のコマンドが走る設定なら、その設定を開発環境のドキュメントのコマンドに直してから作る。
 
 ```text
 orca worktree create --name issue-<number>-<slug> --branch <type>/issue-<number>-<slug> --issue <number> --parent-worktree active --setup run --agent <agent-id> --prompt "<brief>" --json
 ```
 
-`<brief>` には、その Issue の番号、タイトル、本文、コメントにある受け入れ条件、触ってよいパスをそのまま書く。
+このコマンドは応答の JSON が返るまで手前で待つ。別プロセスへ切り離して中断しない。`<brief>` には、その Issue の番号、タイトル、本文、コメントにある受け入れ条件、触ってよいパスをそのまま書く。
 
-起動応答が失われたときは、同じコマンドを `--retry-launch <operationId>` で再実行する。新しい worktree としては作り直さない。
+起動応答が失われたときは、同じコマンドを `--retry-launch <operationId>` で再実行する。`operationId` が無いときは、新しい worktree を作らず、`orca worktree list --json` で既存の子を確認する。
+
+作成後、セットアップ端末のコマンドが `docs/development.md` の `mise exec -- npm ci` であることを確認する。違うコマンドなら、その子は失敗として止め、人間に報告する。エージェントの完了は待たない。
 
 最初の依頼は `--prompt` に載せる。追記は次のコマンドで送る。子エージェントの入力へ `orca terminal send` で打ち込まない。`terminal send` はシェルや自分のペイン用である。
 
