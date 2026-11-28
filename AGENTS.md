@@ -8,7 +8,7 @@
 
 親は作業を、変更ファイルがほとんど重ならない単位に分ける。1 単位が 1 つの GitHub Issue になる。番号の読み方と起票は「6. GitHub Issue 連携」に従う。
 
-親が自分で行うのは、分割、Issue の起票、子の起動、結果の確認、作業ブランチの push、PR の作成、人間への報告までである。子のプロンプトには、Issue のタイトル・本文・受け入れ条件、触ってよいパス、完了時に `docs/development.md` のテストコマンドを実行することを書く。
+親が自分で行うのは、分割、Issue の起票、子の起動、結果の確認、レビュー、人間へのレビューとマージの依頼までである。作業ブランチの push と PR の作成は、実装した子が行う。親は `git push` も `gh pr create` も実行しない。子のプロンプトには、Issue のタイトル・本文・受け入れ条件、触ってよいパス、完了時に `docs/development.md` のテストコマンドを実行すること、その後に自分でブランチを push して PR を作ることを書く。子は `gh pr merge` を実行しない。PR 本文に AI レビューサマリーは書かない。
 
 ## 2. 子ワークスペースの作成と実行
 
@@ -54,22 +54,22 @@ orca agent read <session-id> --json
 
 ## 3. 結果の集約と安全ガード
 
-子のパスは `worktree create --json` の id と path から取る。親はそこで `git status`、`git diff`、`docs/development.md` のテストを見てから、「4. レビューおよび報告ルール」を行う。レビューを通過したあと、「6. GitHub Issue 連携」の手順で作業ブランチを push し、PR を作る。
+子のパスは `worktree create --json` の id と path から取る。親はそこで `git status`、`git diff`、`docs/development.md` のテストを見てから、「4. レビューおよび報告ルール」を行う。レビューを通過したあと、子が作った PR の URL を確認し、人間へレビューとマージを依頼する。親は作業ブランチを push せず、PR も作らない。子が PR をまだ作っていないときは、`orca orchestration send` で子に push と `gh pr create` を依頼する。
 
-親は `gh pr merge` を実行しない。`main` への push と `main` へのマージは、人間の承認があってから行う。PR の URL、変更概要、テスト結果を人間に渡し、レビューとマージの判断は人間が行う。
+親は `gh pr create` と `gh pr merge` を実行しない。`main` への push と `main` へのマージは、人間が GitHub 上で行う。
 
 ## 4. レビューおよび報告ルール
 
-子エージェントの実装完了後、PR 作成および人間への報告を行う際は、以下の 2 フェーズを厳守すること。
+子エージェントの実装完了後、人間への報告を行う際は、以下の 2 フェーズを厳守すること。
 
 1. **レビュー実行フェーズ**
    - 実装した子エージェント自身によるセルフレビューは禁止。親エージェント（または別セッション）が検証を行う。
    - 必ず `docs/review/common-criteria.md` と `docs/review/project-criteria.md` の両方を読み込んで判定する（競合時は `project-criteria.md` を優先）。
    - `Must` の指摘がある場合は子エージェントへ差し戻す（最大 2 回まで）。2 回で解消しない場合は人間へエスカレーションする。
-2. **PR 作成・人間への報告フェーズ**
-   - レビュー通過後（またはエスカレーション時）、必ず `docs/review/report-format.md` のルールとテンプレートに従ってレポートを出力する。
-   - UI 変更時はスクリーンショット、構造変更時は Mermaid 図を添付する。
-   - **自動マージ（`gh pr merge` 等）は禁止。** PR の URL とレポートを提示し、最終判断を人間に委ねる。
+2. **人間への報告フェーズ**
+   - レビュー通過後（またはエスカレーション時）、必ず `docs/review/report-format.md` のルールとテンプレートに従って、人間への連絡としてレポートを出力する。
+   - UI 変更時はスクリーンショット、構造変更時は Mermaid 図を、その連絡に含める。
+   - **GitHub の操作は人間が行う。** 親は PR を作らず、コメントもマージもしない。PR の URL とレポートを提示し、レビューとマージを依頼する。
 
 差し戻しは、子の worktree へ `orca orchestration send` で送る。`terminal send` で子の入力へ打ち込まない。指摘には対象ファイル、行番号、問題点、期待する修正方針を書く。
 
@@ -85,7 +85,7 @@ orca worktree rm --worktree "id:<repoId>::<path>" --json
 
 ## 6. GitHub Issue 連携
 
-リモートは `uttne/recoding`、既定ブランチは `main` である。`.github/ISSUE_TEMPLATE/` と `.github/pull_request_template.md` は無い。本文は下の見出しで書く。テンプレートが増えたら、その見出しを満たしたうえで `Closes #<番号>`、変更点、テスト結果を残す。`gh` は対話プロンプトを出さないよう、本文はファイルに書いて `--body-file` で渡す。`.github/pull_request_template.md` が無いので、`docs/review/report-format.md` のレポートは PR 本文に続ける。
+リモートは `uttne/recoding`、既定ブランチは `main` である。`.github/ISSUE_TEMPLATE/` と `.github/pull_request_template.md` は無い。本文は下の見出しで書く。テンプレートが増えたら、その見出しを満たしたうえで `Closes #<番号>`、変更点、テスト結果を残す。`gh` は対話プロンプトを出さないよう、本文はファイルに書いて `--body-file` で渡す。AI レビューサマリーは PR 本文に書かない。`docs/review/report-format.md` のレポートは、親が人間への連絡に載せる。
 
 ### Issue の取得
 
@@ -128,10 +128,15 @@ gh issue create --title "<title>" --body-file <issue-body.md>
 - 本文
 - 受け入れ条件
 - 触ってよいパス
+- テストのあと、子が自分で `git push -u origin HEAD` と `gh pr create` を実行すること
+- PR 本文は `Closes`、変更点、テスト結果までとし、AI レビューサマリーは書かないこと
+- `gh pr merge` はしないこと
 
 ### PR の作成
 
-子の実装とテストが終わり、親が差分と `mise exec -- npm test` を確認してから、子の worktree で機能ブランチを push し、PR を作る。本文ファイルには、先頭近くに `Closes #<number>` を書き、変更点の要約と実行したテストの結果を続ける。
+PR は実装した子が、自分の worktree で作る。親は作らない。
+
+子は実装と `docs/development.md` のテストのあと、機能ブランチを push し、PR を作る。本文ファイルには、先頭近くに `Closes #<number>` を書き、変更点の要約と実行したテストの結果を続ける。AI レビューサマリーは入れない。
 
 ```text
 git push -u origin HEAD
@@ -148,13 +153,9 @@ Closes #<number>
 
 ## テスト
 - mise exec -- npm test:
-
-## 🤖 AI レビューサマリー
 ```
 
-`## 🤖 AI レビューサマリー` 以降は `docs/review/report-format.md` のテンプレートをそのまま埋める。UI を変えたときは変更前と変更後のスクリーンショットを、データの流れやモジュールの依存が変わったときは Mermaid 図を、同じ本文に入れる。
-
-CI を見るときは、作成された PR 番号で確認する。
+親は、子が作った PR の番号で CI を見てよい。見た結果は人間への連絡に書く。
 
 ```text
 gh pr checks <pr-number>
@@ -162,4 +163,4 @@ gh pr checks <pr-number>
 
 ### 安全ガード
 
-機能ブランチの push と `gh pr create` までは親が進めてよい。`gh pr merge` は実行しない。作成後、PR の URL、変更概要、テスト結果を人間に報告し、レビューとマージの判断を委ねる。
+子は機能ブランチの push と `gh pr create` まで進めてよい。`gh pr merge` は子も親も実行しない。`main` への push とマージは人間が GitHub で行う。親はレビューのあと、PR の URL、変更概要、テスト結果、`docs/review/report-format.md` のレポートを人間に連絡し、レビューとマージを依頼する。
