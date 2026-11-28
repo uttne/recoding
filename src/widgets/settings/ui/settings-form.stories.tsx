@@ -24,6 +24,7 @@ const meta = {
       { id: "basic-poly", label: "Basic Pitch 重音" },
     ],
     a4: 440,
+    levelFloor: -40,
     ceilings: {
       acf2: 4500,
       swiftf0: 2094,
@@ -47,6 +48,7 @@ const meta = {
     onMic: () => undefined,
     onDetector: () => undefined,
     onA4: () => undefined,
+    onLevelFloor: () => undefined,
     onCeiling: () => undefined,
     onDistinguish: () => undefined,
     onPending: () => undefined,

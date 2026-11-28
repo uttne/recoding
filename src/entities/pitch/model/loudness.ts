@@ -14,6 +14,29 @@ export function rmsToDb(rms: number): number | null {
   return Number.isFinite(db) ? db : null;
 }
 
+/** dBFS of the chunk nearest `time`, or null when none is close enough. */
+export function levelDbAt(levels: readonly LevelSample[], time: number): number | null {
+  const rms = levelNear(levels, time);
+  if (rms == null) return null;
+  return rmsToDb(rms);
+}
+
+/** True at the floor and above. A missing level is not loud enough. */
+export function keepsLevel(db: number | null, floor: number): boolean {
+  return db != null && db >= floor;
+}
+
+/**
+ * A voiced point the level gate takes off the graphs.
+ * No floor leaves every point. Silence from the detector is not this gate.
+ */
+export function droppedByLevel(point: PitchPoint, db: number | null, floor: number | undefined): boolean {
+  if (floor == null || !Number.isFinite(floor)) return false;
+  const voiced = (point.pitches != null && point.pitches.length > 0) || (point.hz != null && point.hz > 0);
+  if (!voiced) return false;
+  return !keepsLevel(db, floor);
+}
+
 /** `levels` must be sorted by time. Returns null when nothing is close enough. */
 export function levelNear(levels: readonly LevelSample[], time: number, tolerance = LEVEL_TOLERANCE): number | null {
   const count = levels.length;
@@ -48,6 +71,7 @@ export function loudnessMarks(
   levels: readonly LevelSample[],
   now: number,
   windowSeconds: number,
+  levelFloor?: number,
 ): LoudnessMark[] {
   const marks: LoudnessMark[] = [];
   for (const point of points) {
@@ -57,7 +81,7 @@ export function loudnessMarks(
     const rms = levelNear(levels, point.time);
     if (rms == null) continue;
     const db = rmsToDb(rms);
-    if (db == null || db < DB_FLOOR) continue;
+    if (db == null || db < DB_FLOOR || droppedByLevel(point, db, levelFloor)) continue;
     for (const hz of freqs) {
       if (!(hz > 0)) continue;
       marks.push({

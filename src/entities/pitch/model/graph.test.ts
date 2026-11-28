@@ -69,6 +69,64 @@ describe("pitchVoices", () => {
     expect(voices).toHaveLength(1);
     expect(voices[0].points.map((item) => item.time)).toEqual([1, 1.01]);
   });
+
+  it("breaks on a quiet chunk and would join if that point were only removed", () => {
+    const now = 1.08;
+    const notes = [1, 1.02, 1.04, 1.06, 1.08].map((time) => point({ time, hz: 440 }));
+    const levels = notes.map((note, index) => ({ time: note.time, rms: 10 ** ((index === 2 ? -52 : -18) / 20) }));
+    const gated = pitchVoices(notes, now, 440, { levels, levelFloor: -40 });
+    expect(gated.map((voice) => voice.points.map((item) => item.time))).toEqual([[1, 1.02], [1.06, 1.08]]);
+    const removed = pitchVoices([notes[0], notes[1], notes[3], notes[4]], now, 440);
+    expect(removed).toHaveLength(1);
+    expect(removed[0].points.map((item) => item.time)).toEqual([1, 1.02, 1.06, 1.08]);
+  });
+
+  it("uses chunk loudness for every detector and ignores confidence", () => {
+    const now = 1.02;
+    const voices = pitchVoices(
+      [
+        point({ time: 1, hz: 440, confidence: 0.99, detector: "crepe" }),
+        point({ time: 1.02, hz: 442, confidence: 0.05, detector: "mpm" }),
+      ],
+      now,
+      440,
+      {
+        levels: [
+          { time: 1, rms: 10 ** (-55 / 20) },
+          { time: 1.02, rms: 10 ** (-12 / 20) },
+        ],
+        levelFloor: -40,
+      },
+    );
+    expect(voices).toHaveLength(1);
+    expect(voices[0].detector).toBe("mpm");
+    expect(voices[0].points.map((item) => item.time)).toEqual([1.02]);
+  });
+
+  it("keeps a chord at the floor and breaks when the same chunk is quieter", () => {
+    const chord = (time: number) =>
+      point({
+        time,
+        hz: 440,
+        detector: "basic-poly",
+        pitches: [
+          { hz: 440, confidence: 1 },
+          { hz: 554, confidence: 1 },
+        ],
+      });
+    const kept = pitchVoices([chord(1)], 1, 440, { levels: [{ time: 1, rms: 10 ** (-40 / 20) }], levelFloor: -40 });
+    expect(kept).toHaveLength(2);
+    const broken = pitchVoices([chord(1), chord(1.02), chord(1.04)], 1.04, 440, {
+      levels: [
+        { time: 1, rms: 10 ** (-15 / 20) },
+        { time: 1.02, rms: 10 ** (-50 / 20) },
+        { time: 1.04, rms: 10 ** (-15 / 20) },
+      ],
+      levelFloor: -40,
+    });
+    expect(broken.every((voice) => voice.points.length === 1)).toBe(true);
+    expect(broken.filter((voice) => voice.points[0].time === 1.02)).toHaveLength(0);
+  });
 });
 
 describe("PitchGraph", () => {

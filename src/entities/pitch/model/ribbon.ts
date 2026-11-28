@@ -104,7 +104,7 @@ export function ribbonRuns(
   options: VoiceOptions = {},
 ): RibbonRun[] {
   const runs: RibbonRun[] = [];
-  for (const voice of pitchVoices(points, now, a4, options)) {
+  for (const voice of pitchVoices(points, now, a4, { ...options, levels })) {
     if (voice.points.length < 2) continue;
     const smoothed = medianLoudness(
       voice.points.map((point) => {

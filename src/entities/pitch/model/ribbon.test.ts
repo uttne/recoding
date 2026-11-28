@@ -126,6 +126,18 @@ describe("ribbonRuns", () => {
     expect(runs[0].vertices.map((vertex) => vertex.gain)).toEqual(runs[1].vertices.map((vertex) => vertex.gain));
     expect(runs[0].alpha).toBe(1);
   });
+
+  it("breaks the band on a quiet chunk instead of joining the notes around it", () => {
+    const notes = [1, 1.02, 1.04, 1.06, 1.08].map((time) => point({ time, hz: 440 }));
+    const levels = notes.map((note, index) => ({ time: note.time, rms: dbToRms(index === 2 ? -52 : -18) }));
+    expect(ribbonRuns(notes, levels, 1.08, 440)).toHaveLength(1);
+    const runs = ribbonRuns(notes, levels, 1.08, 440, { levelFloor: -40 });
+    expect(runs.map((run) => run.vertices.map((vertex) => vertex.time))).toEqual([
+      [1, 1.02],
+      [1.06, 1.08],
+    ]);
+    expect(ribbonRuns([notes[0], notes[1], notes[3], notes[4]], levels, 1.08, 440)).toHaveLength(1);
+  });
 });
 
 describe("densifyRibbon", () => {

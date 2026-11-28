@@ -9,7 +9,16 @@ import { SWIFT_FMAX, SWIFT_FMIN } from "../../../audio/swiftf0";
 import type { FrequencyRange, GraphRanges } from "../../pitch/model/graph";
 import type { PitchAxisMode } from "../../pitch/model/pitch-axis";
 import { scaleChoiceFromId, scaleChoiceId, type ScaleChoice } from "../../pitch/model/scale";
-import { loadSettings, saveSettings, type CeilingId, type Settings, type ViewId } from "./preferences";
+import {
+  DEFAULT_LEVEL_FLOOR,
+  LEVEL_FLOOR_MAX,
+  LEVEL_FLOOR_MIN,
+  loadSettings,
+  saveSettings,
+  type CeilingId,
+  type Settings,
+  type ViewId,
+} from "./preferences";
 import { sessionPorts } from "./runtime";
 import { resetFollow } from "./stage";
 
@@ -48,6 +57,7 @@ const ceilings: Record<DetectorId, number> = {
 };
 
 let a4 = 440;
+let levelFloor = DEFAULT_LEVEL_FLOOR;
 let view: ViewId = "pitch";
 let distinguish = false;
 let guides = true;
@@ -63,6 +73,10 @@ let format: AudioFormat = "wav";
 
 export function getA4(): number {
   return a4;
+}
+
+export function getLevelFloor(): number {
+  return levelFloor;
 }
 
 export function getView(): ViewId {
@@ -157,6 +171,7 @@ function currentSettings(): Settings {
     format,
     detector: sessionPorts().engine.detector,
     a4,
+    levelFloor,
     ceilings: ceilingChoices(),
     view,
     distinguish,
@@ -180,6 +195,7 @@ function defaultSettings(): Settings {
     format: "wav",
     detector: "acf-basic",
     a4: 440,
+    levelFloor: DEFAULT_LEVEL_FLOOR,
     ceilings: {
       acf2: ACF_FMAX_HZ,
       swiftf0: SWIFT_FMAX,
@@ -206,6 +222,7 @@ export function restoreSettings(): void {
   const engine = sessionPorts().engine;
   format = stored.format;
   a4 = stored.a4;
+  levelFloor = stored.levelFloor;
   view = stored.view;
   distinguish = stored.distinguish;
   guides = stored.guides;
@@ -248,6 +265,14 @@ export function setA4(next: number): void {
   a4 = next;
   remember();
   sessionPorts().publish();
+}
+
+/** Stores the floor. The session publishes after it refreshes the note on screen. */
+export function setLevelFloor(next: number): boolean {
+  if (!Number.isFinite(next) || next < LEVEL_FLOOR_MIN || next > LEVEL_FLOOR_MAX) return false;
+  levelFloor = next;
+  remember();
+  return true;
 }
 
 export function setCeiling(id: CeilingId, next: number): void {

@@ -3,7 +3,7 @@ import type { DetectorId, PitchPoint } from "../../../audio/engine";
 import { hzToMidi } from "../../../audio/notes";
 import { MIDI_LOW, PitchGraph, WINDOW_SECONDS, viewMidiHigh } from "../../pitch/model/graph";
 import { LoudnessGraph } from "../../pitch/model/loudness-graph";
-import type { LevelSample } from "../../pitch/model/loudness";
+import { droppedByLevel, levelDbAt, type LevelSample } from "../../pitch/model/loudness";
 import { clampFixedSpan, easePitchSpan, followPitchSpan, type PitchSpan } from "../../pitch/model/pitch-axis";
 import { RibbonGraph } from "../../pitch/model/ribbon-graph";
 import { sessionPorts } from "./runtime";
@@ -13,6 +13,7 @@ import {
   getAxisLow,
   getAxisMode,
   getAxisOctaves,
+  getLevelFloor,
   getDistinguish,
   getGuides,
   getPending,
@@ -24,6 +25,7 @@ const LAGGING = new Set<DetectorId>(["acf-basic", "swiftf0", "pyin", "crepe", "b
 
 const points: PitchPoint[] = [];
 const levels: LevelSample[] = [];
+const levelByPoint = new WeakMap<PitchPoint, number | null>();
 const confirmed = new Map<DetectorId, number>();
 let followTarget: PitchSpan | null = null;
 let followShown: PitchSpan | null = null;
@@ -41,8 +43,18 @@ export function graphPoints(): readonly PitchPoint[] {
   return points;
 }
 
+/** dBFS captured with the point. Null when that chunk had no usable level. */
+export function pitchLevelDb(point: PitchPoint): number | null {
+  return levelByPoint.get(point) ?? null;
+}
+
+function rememberLevel(point: PitchPoint): void {
+  levelByPoint.set(point, levelDbAt(levels, point.time));
+}
+
 export function pushPoint(point: PitchPoint): void {
   points.push(point);
+  rememberLevel(point);
   if (!(point.detector === "acf-basic" && point.provisional)) confirmed.set(point.detector, point.time);
   trimPoints();
 }
@@ -57,6 +69,9 @@ export function revisePoints(frames: readonly RevisionFrame[], basicFmax: number
   }));
   points.length = 0;
   points.push(...revised);
+  for (const point of points) {
+    if (!levelByPoint.has(point)) rememberLevel(point);
+  }
   const until = frames.reduce((max, frame) => Math.max(max, frame.time), Number.NEGATIVE_INFINITY);
   if (until > Number.NEGATIVE_INFINITY) confirmed.set("acf-basic", until);
   trimPoints();
@@ -105,7 +120,9 @@ function latestMidi(now: number): number | null {
   for (let i = points.length - 1; i >= 0; i--) {
     const point = points[i];
     if (point.time < cutoff) break;
-    if (point.hz != null && point.hz > 0) return hzToMidi(point.hz, getA4());
+    if (point.hz != null && point.hz > 0 && !droppedByLevel(point, pitchLevelDb(point), getLevelFloor())) {
+      return hzToMidi(point.hz, getA4());
+    }
   }
   return null;
 }
@@ -146,6 +163,7 @@ export function mountStage(root: HTMLElement, canvases: {
     const graphFrame = {
       pendingFrom: getPending() ? pendingFrom() : null,
       ranges: ranges(),
+      levelFloor: getLevelFloor(),
       style: {
         distinguish: getDistinguish(),
         guides: getGuides(),
@@ -158,7 +176,7 @@ export function mountStage(root: HTMLElement, canvases: {
     pitch.setA4(a4);
     ribbon.setA4(a4);
     loudness.setA4(a4);
-    pitch.draw(points, now, graphFrame);
+    pitch.draw(points, now, graphFrame, levels);
     ribbon.draw(points, levels, now, graphFrame);
     loudness.draw(points, levels, now, graphFrame);
     frame = requestAnimationFrame(paint);

@@ -1,5 +1,6 @@
 import { hzToMidi, noteName } from "../../../audio/notes";
 import type { DetectorId, PitchPoint } from "../../../audio/engine";
+import { droppedByLevel, levelDbAt, type LevelSample } from "./loudness";
 import { scaleRole, type ScaleChoice } from "./scale";
 
 export const MIDI_LOW = 30;
@@ -92,6 +93,8 @@ export type GraphFrame = {
   ranges?: GraphRanges;
   /** Omitted style keeps the debug drawing used by the original graphs. */
   style?: GraphStyle;
+  /** dBFS. A voiced point quieter than this breaks the line. Omitted draws every voiced point. */
+  levelFloor?: number;
 };
 
 /** A pitch the time-pitch line keeps. Several voices can share one timestamp. */
@@ -115,10 +118,14 @@ const VOICE_GAP_SECONDS = 0.05;
 export type VoiceOptions = {
   /** Start a new stroke where ACF2+ hands over to Basic. Default keeps that split. */
   splitProvisional?: boolean;
+  /** Chunk levels. With `levelFloor`, a quieter voiced point is a break, not a missing sample. */
+  levels?: readonly LevelSample[];
+  /** dBFS. Omitted keeps every voiced point. */
+  levelFloor?: number;
 };
 
 /**
- * Voices for the time-pitch line. Breaks on silence, a gap over 50 ms,
+ * Voices for the time-pitch line. Breaks on silence, a level below `levelFloor`, a gap over 50 ms,
  * a detector change, or a jump past the semitone limit.
  * With `splitProvisional: false`, an ACF2+→Basic handoff stays one stroke and uses the wider join.
  */
@@ -136,7 +143,14 @@ export function pitchVoices(
   type Open = { time: number; midi: number; detector: DetectorId; provisional: boolean; voice: PitchVoice };
   let open: Open[] = [];
   for (const point of visible) {
-    const freqs = point.pitches?.length ? point.pitches.map((pitch) => pitch.hz) : point.hz == null ? [] : [point.hz];
+    const db = options.levels ? levelDbAt(options.levels, point.time) : null;
+    const freqs = droppedByLevel(point, db, options.levelFloor)
+      ? []
+      : point.pitches?.length
+        ? point.pitches.map((pitch) => pitch.hz)
+        : point.hz == null
+          ? []
+          : [point.hz];
     if (freqs.length === 0) {
       open = [];
       continue;
@@ -373,7 +387,7 @@ export class PitchGraph {
     this.canvas.height = Math.max(1, Math.floor(height * ratio));
   }
 
-  draw(points: PitchPoint[], now: number, frame: GraphFrame = {}): void {
+  draw(points: PitchPoint[], now: number, frame: GraphFrame = {}, levels: readonly LevelSample[] = []): void {
     const layout = paintPitchTimeAxes(this.ctx, this.canvas.width, this.canvas.height, now, this.a4, frame);
     const { ctx } = this;
     const { ratio, plotLeft, plotTop, plotWidth, plotHeight, midiLow, midiHigh } = layout;
@@ -381,7 +395,11 @@ export class PitchGraph {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const distinguish = frame.style?.distinguish !== false;
-    for (const voice of pitchVoices(points, now, this.a4, { splitProvisional: distinguish })) {
+    for (const voice of pitchVoices(points, now, this.a4, {
+      splitProvisional: distinguish,
+      levels,
+      levelFloor: frame.levelFloor,
+    })) {
       ctx.beginPath();
       ctx.strokeStyle = pointColor(voice.detector, voice.provisional, distinguish);
       const first = voice.points[0];
