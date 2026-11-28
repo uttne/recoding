@@ -42,3 +42,11 @@ mise exec -- npm ci
 `vite.config.ts` を変えたあとは、開発サーバーを止めてから `mise exec -- npm run dev` をやり直す。
 
 mise をシェルに有効化している場合は `mise exec --` を外してよい。有効化していないシェルで外してはいけない。
+
+## エージェントの一時処理
+
+人間が手で打つシェルは PowerShell でよい。依存のインストール、テスト、ビルドは上の表だけを使う。
+
+表に無い処理のうち、ファイルを読む、文字列を組み立てる、JSON を数える、ブラウザへ渡す式をファイルから作る、といったものは `mise exec -- node` で行う。Python は使わない。PowerShell の .NET 静的呼び出しで文字列を加工しない。`[Text.Encoding]::UTF8.GetBytes` や `[Convert]::ToBase64String` は、その静的呼び出しである。
+
+`orca eval` の `--expression` は、式をファイルに書いてから渡す。式の中の引用符を消すために、スクリプトを Base64 へ包んで `eval(atob(...))` として渡さない。グラフの目盛りを数える処理も、バイト列への変換が要るわけではない。Node で読めるファイルと、ブラウザ上の `orca` の操作に分ける。

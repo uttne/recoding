@@ -6,7 +6,7 @@
 
 ## 前提
 
-- Windows 上で開発している想定です。コマンドは PowerShell です。
+- Windows 上で開発している想定です。人間が手で打つときのシェルは PowerShell です。エージェントがファイルや文字列を加工するときは [development.md](development.md) の Node を使います。
 - 環境は [development.md](development.md) の手順で入れます。Node も npm も mise の中にあり、mise を通さないコマンドは使えません。
 - マイクが使えること。ページは `http://localhost` で開けばマイク許可を求められます。
 

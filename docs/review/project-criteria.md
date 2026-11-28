@@ -17,7 +17,7 @@
 
 `npm run build` は `tsc --noEmit` のあとに `vite build` を実行する。`tsconfig.json` は `src/**/*.stories.tsx` を型チェックから外している。ストーリーの型は `build-storybook` で見る。
 
-`pnpm install` や、mise を通さない `npm` / `npx` は使わない。ロックは `package-lock.json` である。
+`pnpm install` や、mise を通さない `npm` / `npx` は使わない。ロックは `package-lock.json` である。表に無い一時処理は `docs/development.md` の「エージェントの一時処理」に従い、`mise exec -- node` で行う。PowerShell の .NET 静的呼び出しと Python は使わない。
 
 ## 2. ディレクトリ構成・設計規約
 

@@ -2,7 +2,7 @@
 
 人間は親エージェントとだけ話す。親は実装を自分で抱えず、Orca の子 worktree と子エージェントに渡す。コマンドは Orca 1.4.280 の `orca`（`orca.exe`）で確認したもの。
 
-このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。データベースは無い。環境の入れ方、依存のインストール、テスト、ビルドは `docs/development.md` だけに従う。そこに無いコマンドを作らない。子のプロンプトに書くテストも、その文書の `mise exec -- npm test` である。実装後のレビューは `docs/review/common-criteria.md` と `docs/review/project-criteria.md`、人間への報告は `docs/review/report-format.md` に従う。手順は「4. レビューおよび報告ルール」である。
+このリポジトリはブラウザ向けの音程レコーダー（TypeScript、React、Vite）である。データベースは無い。環境の入れ方、依存のインストール、テスト、ビルドは `docs/development.md` だけに従う。そこに無いコマンドを作らない。子のプロンプトに書くテストも、その文書の `mise exec -- npm test` である。ファイルの読み書き、文字列の加工、一時スクリプトは、同文書の「エージェントの一時処理」に従い `mise exec -- node` で行う。PowerShell の .NET 静的呼び出し（`[Text.Encoding]::` や `[Convert]::`）と Python は使わない。`orca eval` に渡す式はファイルに書き、Base64 へ包まない。実装後のレビューは `docs/review/common-criteria.md` と `docs/review/project-criteria.md`、人間への報告は `docs/review/report-format.md` に従う。手順は「4. レビューおよび報告ルール」である。
 
 ## 1. 役割分担
 
@@ -131,6 +131,7 @@ gh issue create --title "<title>" --body-file <issue-body.md>
 - テストのあと、子が自分で `git push -u origin HEAD` と `gh pr create` を実行すること
 - PR 本文は `Closes`、変更点、テスト結果までとし、AI レビューサマリーとスクリーンショットは書かないこと。それらは親がレビュー後に PR コメントへ載せる
 - `gh pr merge` はしないこと
+- ファイルの読み書き、文字列の加工、一時スクリプトは `docs/development.md` の `mise exec -- node` で行うこと。PowerShell の .NET 静的呼び出しと Python は使わないこと。`orca eval` の式はファイルに書き、Base64 へ包まないこと
 
 ### PR の作成
 
