@@ -1,4 +1,4 @@
-import type { ViewId } from "@/entities/session/model/session";
+import type { ViewId } from "@/entities/session/model/preferences";
 
 export function PitchIcon() {
   return (
